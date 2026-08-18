@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
 export const metadata: Metadata = {
   title: "Manual-to-Flowchart Generator",
   description: "เครื่องมือ Local-first สำหรับแปลงคู่มือ PDF/DOCX/TXT เป็น Flowchart และข้อมูลกระบวนงานที่แก้ไขต่อได้",
@@ -8,8 +10,8 @@ export const metadata: Metadata = {
     "codex-preview": "development",
   },
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: `${basePath}/favicon.svg`,
+    shortcut: `${basePath}/favicon.svg`,
   },
 };
 
