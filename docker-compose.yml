@@ -1,0 +1,12 @@
+services:
+  manual-flow-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: manual-to-flowchart-app
+    restart: always
+    ports:
+      - "80:80"
+      - "8080:80"
+    environment:
+      - NODE_ENV=production
