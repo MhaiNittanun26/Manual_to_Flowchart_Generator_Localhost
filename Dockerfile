@@ -20,4 +20,4 @@ ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
 
-CMD ["npx", "vinext", "start"]
+CMD ["node", "server/node-server.mjs"]

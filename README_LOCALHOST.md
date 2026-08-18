@@ -59,6 +59,7 @@ chmod +x start-local.sh
 - `app/lib/types.ts` — Canonical data model
 - `app/lib/exporters.ts` — JSON/XLSX/PPTX/ZIP export และการผูก PowerPoint Connector
 - `app/lib/sample.ts` — ชุดข้อมูลตัวอย่าง
+- `server/node-server.mjs` — Production server สำหรับรันหลัง nginx (จัดการ basePath + static asset)
 
 
 ## Deploy บนเซิร์ฟเวอร์ที่ใช้ nginx
@@ -67,7 +68,7 @@ chmod +x start-local.sh
 
 ### 1. รันแอปให้ฟังพอร์ตภายในเครื่อง
 
-รันด้วย Docker Compose (คอนเทนเนอร์ build เองและ serve ด้วย vinext production server ที่พอร์ต 3040 ของ host)
+รันด้วย Docker Compose (คอนเทนเนอร์ build เองแล้ว serve ด้วย `server/node-server.mjs` ออกมาที่พอร์ต 3040 ของ host)
 
 ```bash
 docker compose up -d --build
@@ -86,6 +87,8 @@ PORT=3040 npm start
 ```bash
 curl -I http://127.0.0.1:3040/workflow-intelligence
 ```
+
+หมายเหตุ: อย่าใช้ `vinext start` เพราะ production server ของ vinext มองหา static asset จาก path `/assets/` ตรง ๆ พอมี `basePath` คำขอ `/workflow-intelligence/assets/*.js` จะตกไปที่ RSC handler แล้วได้ 404 (หน้าเว็บขึ้นแต่ไม่มี CSS/JS) `npm start` จึงรัน `server/node-server.mjs` ที่ตัด `basePath` ออกก่อนหา static file แล้วส่งงานที่เหลือให้ worker entry ที่ build ไว้
 
 ### 2. เพิ่มบล็อกใน nginx
 
@@ -136,3 +139,5 @@ BASE_PATH= npm run build                # เสิร์ฟที่ root ต�
 ```
 
 สำหรับ Docker ใช้ build arg ชื่อเดียวกัน เช่น `docker compose build --build-arg BASE_PATH=/another-path`
+
+และต้องตั้ง `BASE_PATH` ตัวเดียวกันตอนรัน `npm start` ด้วย เพราะ `server/node-server.mjs` ใช้ค่านี้ตัด prefix ก่อนหา static file (Dockerfile ตั้ง `ENV BASE_PATH` ให้จาก build arg อยู่แล้ว)
