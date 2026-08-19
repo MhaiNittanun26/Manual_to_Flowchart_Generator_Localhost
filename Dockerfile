@@ -1,12 +1,23 @@
-# Production Nginx Container
-FROM nginx:alpine
+# Production container: builds the app and serves it with the vinext production
+# server. Nginx on the host proxies /workflow-intelligence to this port
+# (see deploy/nginx-workflow-intelligence.conf).
+FROM node:22-alpine
 
-# Copy custom Nginx configuration
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+WORKDIR /app
 
-# Copy pre-built production static files directly to Nginx web root
-COPY dist/client /usr/share/nginx/html
+# basePath is baked in at build time, so it must be set before `vinext build`.
+ARG BASE_PATH=/workflow-intelligence
+ENV BASE_PATH=${BASE_PATH}
 
-EXPOSE 80
+COPY package.json package-lock.json .npmrc ./
+# vinext/vite are devDependencies but are required to build and to serve.
+RUN npm ci --include=dev
 
-CMD ["nginx", "-g", "daemon off;"]
+COPY . .
+RUN npx vinext build
+
+ENV NODE_ENV=production
+ENV PORT=3000
+EXPOSE 3000
+
+CMD ["node", "server/node-server.mjs"]

@@ -6,6 +6,7 @@ import {
   Check,
   ChevronRight,
   CirclePlus,
+  Copy,
   Database,
   Download,
   FileJson,
@@ -26,7 +27,7 @@ import {
   X,
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
-import { buildDeliveryZip, buildDocxDocument, buildEditablePptx, buildWorkbook, downloadBlob, workflowFileName, workflowJsonBlob } from "./lib/exporters";
+import { buildDeliveryZip, buildDocxDocument, buildEditablePptx, buildWorkbook, buildTextBlob, buildTextContent, downloadBlob, workflowFileName, workflowJsonBlob } from "./lib/exporters";
 import { readManualFile } from "./lib/file-reader";
 import { defaultPattern, extractWorkflow, qaWorkflow } from "./lib/parser";
 import { sampleWorkflow } from "./lib/sample";
@@ -420,11 +421,14 @@ export default function Home() {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [connectingSourceId, setConnectingSourceId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [viewMode, setViewMode] = useState<"flow" | "text">("flow");
+  const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const qa = useMemo(() => qaWorkflow(workflow), [workflow]);
   const failures = qa.filter((item) => item.level === "fail").length;
   const warnings = qa.filter((item) => item.level === "warning").length;
+  const generatedText = useMemo(() => buildTextContent(workflow), [workflow]);
 
   function clearData() {
     setManualText("");
@@ -460,10 +464,23 @@ export default function Home() {
     if (!file) return;
     setBusy("กำลังอ่านไฟล์…");
     try {
-      const text = await readManualFile(file);
-      setManualText(text);
-      setFileName(file.name);
-      setNotice(`อ่าน ${file.name} แล้ว (${text.length.toLocaleString()} ตัวอักษร)`);
+      const extension = file.name.split(".").pop()?.toLowerCase();
+      if (extension === "json") {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        if (data.workflow) {
+          applyWorkflow(data.workflow);
+          setFileName(file.name);
+          setNotice(`นำเข้า Workflow จาก ${file.name} เรียบร้อยแล้ว`);
+        } else {
+          throw new Error("รูปแบบไฟล์ JSON ไม่รองรับ กรุณาใช้ไฟล์ที่ส่งออกจากระบบนี้");
+        }
+      } else {
+        const text = await readManualFile(file);
+        setManualText(text);
+        setFileName(file.name);
+        setNotice(`อ่าน ${file.name} แล้ว (${text.length.toLocaleString()} ตัวอักษร)`);
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "อ่านไฟล์ไม่สำเร็จ");
     } finally {
@@ -601,6 +618,20 @@ export default function Home() {
     }
   }
 
+  async function exportText() {
+    setBusy("กำลังสร้างข้อความ (TXT)…");
+    try {
+      const txtBlob = buildTextBlob(workflow);
+      downloadBlob(txtBlob, workflowFileName(workflow, "txt"));
+      setNotice("ดาวน์โหลดไฟล์ข้อความ (TXT) สำเร็จแล้ว");
+    } catch (error) {
+      setNotice(`สร้างข้อความไม่สำเร็จ: ${error instanceof Error ? error.message : "ข้อผิดพลาดไม่ทราบสาเหตุ"}`);
+    } finally {
+      setBusy("");
+    }
+  }
+
+
   async function exportPptx() {
     setBusy("กำลังสร้าง PowerPoint และผูก Connector…");
     try {
@@ -623,6 +654,46 @@ export default function Home() {
       setNotice("ดาวน์โหลดชุดส่งมอบ ZIP แล้ว");
     } catch (error) {
       setNotice(`สร้าง ZIP ไม่สำเร็จ: ${error instanceof Error ? error.message : "ข้อผิดพลาดไม่ทราบสาเหตุ"}`);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function exportXlsx() {
+    setBusy("กำลังสร้างไฟล์ Excel…");
+    try {
+      const blob = buildWorkbook(workflow);
+      downloadBlob(blob, workflowFileName(workflow, "xlsx"));
+      setNotice("ดาวน์โหลด Excel Data Model สำเร็จแล้ว");
+    } catch (error) {
+      setNotice(`สร้าง Excel ไม่สำเร็จ: ${error instanceof Error ? error.message : "ข้อผิดพลาดไม่ทราบสาเหตุ"}`);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function exportJson() {
+    setBusy("กำลังสร้างไฟล์ JSON…");
+    try {
+      const blob = workflowJsonBlob(workflow);
+      downloadBlob(blob, workflowFileName(workflow, "json"));
+      setNotice("ดาวน์โหลด Canonical JSON สำเร็จแล้ว");
+    } catch (error) {
+      setNotice(`สร้าง JSON ไม่สำเร็จ: ${error instanceof Error ? error.message : "ข้อผิดพลาดไม่ทราบสาเหตุ"}`);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function exportPng() {
+    setBusy("กำลังสร้างภาพ PNG…");
+    try {
+      if (!svgRef.current) throw new Error("ไม่พบโครงสร้าง SVG");
+      const pngBlob = await svgToPng(svgRef.current);
+      downloadBlob(pngBlob, workflowFileName(workflow, "png"));
+      setNotice("ดาวน์โหลดภาพตรวจทาน PNG สำเร็จแล้ว");
+    } catch (error) {
+      setNotice(`สร้าง PNG ไม่สำเร็จ: ${error instanceof Error ? error.message : "ข้อผิดพลาดไม่ทราบสาเหตุ"}`);
     } finally {
       setBusy("");
     }
@@ -666,9 +737,9 @@ export default function Home() {
         <aside className="left-rail">
           <div className="panel upload-panel">
             <div className="panel-heading"><div><small>STEP 01</small><h2>นำเข้าคู่มือ</h2></div><FileText size={20} /></div>
-            <input ref={fileInputRef} type="file" accept=".pdf,.docx,.txt,.md" hidden onChange={(event) => acceptFile(event.target.files?.[0])} />
+            <input ref={fileInputRef} type="file" accept=".pdf,.docx,.txt,.md,.json" hidden onChange={(event) => acceptFile(event.target.files?.[0])} />
             <button className={`drop-zone ${dragging ? "dragging" : ""}`} onClick={() => fileInputRef.current?.click()} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); acceptFile(event.dataTransfer.files[0]); }}>
-              <UploadCloud size={28} /><strong>วางไฟล์ที่นี่ หรือคลิกเพื่อเลือก</strong><span>PDF · DOCX · TXT · MD</span>
+              <UploadCloud size={28} /><strong>วางไฟล์ที่นี่ หรือคลิกเพื่อเลือก</strong><span>PDF · DOCX · TXT · MD · JSON</span>
             </button>
             <div className="file-chip">
               <FileText size={15} />
@@ -702,107 +773,155 @@ export default function Home() {
         <section className="main-stage">
           <div className="panel stage-toolbar">
             <div className="workflow-title-block"><span className="workflow-id">{workflow.id}</span><input value={workflow.name} onChange={(event) => setWorkflow((current) => ({ ...current, name: event.target.value }))} aria-label="ชื่อ Workflow" /><small>วิเคราะห์แบบ {workflow.analysisMode === "pattern" ? "Pattern offline" : "ตัวอย่างระบบ"}</small></div>
+            <div className="mode-switcher">
+              <button className={`mode-btn ${viewMode === "flow" ? "active" : ""}`} onClick={() => setViewMode("flow")} title="แสดงผลลัพธ์เป็นไดอะแกรม Flowchart"><GitBranch size={15} /> แปลง Text ➔ Flow (Diagram)</button>
+              <button className={`mode-btn ${viewMode === "text" ? "active" : ""}`} onClick={() => setViewMode("text")} title="แสดงผลลัพธ์เป็นข้อความระเบียบปฏิบัติงาน SOP"><FileText size={15} /> แปลง Flow ➔ Text (SOP 15 หมวด)</button>
+            </div>
             <div className="qa-summary"><span className={failures ? "qa-fail" : "qa-pass"}>{failures ? <AlertTriangle size={14} /> : <Check size={14} />}{failures ? `${failures} Fail` : "โครงสร้างผ่าน"}</span><span className="qa-warn">{warnings} จุดควรทบทวน</span></div>
           </div>
 
-          <div className="panel flow-panel">
-            <div className="flow-panel-heading">
-              <div><small>LIVE PREVIEW (CLICK TO EDIT)</small><h2>โครงสร้าง Flowchart</h2></div>
-              <div className="legend"><span><i className="legend-start" />เริ่ม/สิ้นสุด</span><span><i className="legend-process" />ขั้นตอน</span><span><i className="legend-decision" />ตัดสินใจ</span></div>
-            </div>
-            <div className="flow-scroll">
-              <FlowPreview
-                workflow={workflow}
-                svgRef={svgRef}
-                selectedNodeId={selectedNodeId}
-                selectedEdgeId={selectedEdgeId}
-                connectingSourceId={connectingSourceId}
-                onSelectNode={setSelectedNodeId}
-                onSelectEdge={setSelectedEdgeId}
-                onStartConnection={handleStartConnection}
-                onCompleteConnection={handleCompleteConnection}
-                onCancelConnection={handleCancelConnection}
-                onUpdateNode={updateNode}
-                onDeleteNode={deleteNode}
-                onAddNodeAfter={addNodeAfter}
-              />
-            </div>
+          {viewMode === "flow" ? (
+            <div className="panel flow-panel">
+              <div className="flow-panel-heading">
+                <div><small>LIVE PREVIEW (CLICK TO EDIT)</small><h2>โครงสร้าง Flowchart</h2></div>
+                <div className="legend"><span><i className="legend-start" />เริ่ม/สิ้นสุด</span><span><i className="legend-process" />ขั้นตอน</span><span><i className="legend-decision" />ตัดสินใจ</span></div>
+              </div>
+              <div className="flow-scroll">
+                <FlowPreview
+                  workflow={workflow}
+                  svgRef={svgRef}
+                  selectedNodeId={selectedNodeId}
+                  selectedEdgeId={selectedEdgeId}
+                  connectingSourceId={connectingSourceId}
+                  onSelectNode={setSelectedNodeId}
+                  onSelectEdge={setSelectedEdgeId}
+                  onStartConnection={handleStartConnection}
+                  onCompleteConnection={handleCompleteConnection}
+                  onCancelConnection={handleCancelConnection}
+                  onUpdateNode={updateNode}
+                  onDeleteNode={deleteNode}
+                  onAddNodeAfter={addNodeAfter}
+                />
+              </div>
 
-            {/* Quick Node Editor Toolbar when Selected */}
-            {selectedNode ? (
-              <div className="selected-node-bar">
-                <div className="node-bar-info">
-                  <code>{selectedNode.id}</code>
-                  <strong>แก้ไขกล่องที่เลือก</strong>
+              {/* Quick Node Editor Toolbar when Selected */}
+              {selectedNode ? (
+                <div className="selected-node-bar">
+                  <div className="node-bar-info">
+                    <code>{selectedNode.id}</code>
+                    <strong>แก้ไขกล่องที่เลือก</strong>
+                  </div>
+                  <div className="node-bar-inputs">
+                    <input
+                      value={selectedNode.text}
+                      onChange={(e) => updateNode(selectedNode.id, { text: e.target.value })}
+                      placeholder="ข้อความในกล่อง"
+                    />
+                    <select
+                      value={selectedNode.type}
+                      onChange={(e) => updateNode(selectedNode.id, { type: e.target.value as NodeType })}
+                    >
+                      {Object.entries(typeLabels).map(([val, label]) => (
+                        <option key={val} value={val}>{label}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={selectedNode.lane}
+                      onChange={(e) => updateNode(selectedNode.id, { lane: e.target.value })}
+                    >
+                      {workflow.lanes.map((lane) => (
+                        <option key={lane} value={lane}>{lane}</option>
+                      ))}
+                    </select>
+                    <button className="add-next-btn" onClick={() => handleStartConnection(selectedNode.id)} title="ลากเส้นเชื่อมไปกล่องอื่น">
+                      🔗 ลากเส้นเชื่อม
+                    </button>
+                    <button className="add-next-btn" onClick={() => addNodeAfter(selectedNode.id)}>
+                      <CirclePlus size={14} /> เพิ่มขั้นตอนต่อ
+                    </button>
+                    <button className="del-node-btn" onClick={() => { deleteNode(selectedNode.id); setSelectedNodeId(null); }}>
+                      <Trash2 size={14} /> ลบกล่อง
+                    </button>
+                  </div>
                 </div>
-                <div className="node-bar-inputs">
-                  <input
-                    value={selectedNode.text}
-                    onChange={(e) => updateNode(selectedNode.id, { text: e.target.value })}
-                    placeholder="ข้อความในกล่อง"
-                  />
-                  <select
-                    value={selectedNode.type}
-                    onChange={(e) => updateNode(selectedNode.id, { type: e.target.value as NodeType })}
+              ) : null}
+
+              {/* Quick Edge Editor Toolbar when Selected */}
+              {selectedEdge ? (
+                <div className="selected-node-bar edge-bar">
+                  <div className="node-bar-info">
+                    <code style={{ background: "#f0bd52", color: "#0f3e2d" }}>{selectedEdge.id}</code>
+                    <strong>แก้ไขเส้นเชื่อม: {selectedEdge.source} ➔ {selectedEdge.target}</strong>
+                  </div>
+                  <div className="node-bar-inputs">
+                    <input
+                      value={selectedEdge.label}
+                      onChange={(e) => updateEdge(selectedEdge.id, { label: e.target.value })}
+                      placeholder="ข้อความบนเส้น (เช่น เห็นชอบ / อนุมัติ)"
+                    />
+                    <select
+                      value={selectedEdge.style}
+                      onChange={(e) => updateEdge(selectedEdge.id, { style: e.target.value as FlowEdge["style"] })}
+                    >
+                      <option value="solid">เส้นทึบ</option>
+                      <option value="dash">เส้นประ</option>
+                    </select>
+                    <input
+                      type="color"
+                      value={selectedEdge.color || "#165B40"}
+                      onChange={(e) => updateEdge(selectedEdge.id, { color: e.target.value })}
+                      style={{ width: "36px", padding: "2px", height: "30px", cursor: "pointer" }}
+                    />
+                    <button className="del-node-btn" onClick={() => { deleteEdge(selectedEdge.id); setSelectedEdgeId(null); }}>
+                      <Trash2 size={14} /> ลบเส้นเชื่อม
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="panel text-panel">
+              <div className="text-panel-heading">
+                <div>
+                  <small>LIVE TEXT CONVERTER (SOP GENERATOR)</small>
+                  <h2>ข้อความระเบียบปฏิบัติงาน (SOP 15 หมวด)</h2>
+                </div>
+                <div className="text-view-actions">
+                  <button
+                    className="text-action-btn"
+                    disabled={!generatedText}
+                    onClick={() => {
+                      if (!generatedText) return;
+                      navigator.clipboard.writeText(generatedText);
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 2000);
+                    }}
                   >
-                    {Object.entries(typeLabels).map(([val, label]) => (
-                      <option key={val} value={val}>{label}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={selectedNode.lane}
-                    onChange={(e) => updateNode(selectedNode.id, { lane: e.target.value })}
-                  >
-                    {workflow.lanes.map((lane) => (
-                      <option key={lane} value={lane}>{lane}</option>
-                    ))}
-                  </select>
-                  <button className="add-next-btn" onClick={() => handleStartConnection(selectedNode.id)} title="ลากเส้นเชื่อมไปกล่องอื่น">
-                    🔗 ลากเส้นเชื่อม
+                    {copied ? <Check size={14} color="#155b40" /> : <Copy size={14} />}
+                    {copied ? "คัดลอกแล้ว!" : "คัดลอกข้อความ"}
                   </button>
-                  <button className="add-next-btn" onClick={() => addNodeAfter(selectedNode.id)}>
-                    <CirclePlus size={14} /> เพิ่มขั้นตอนต่อ
-                  </button>
-                  <button className="del-node-btn" onClick={() => { deleteNode(selectedNode.id); setSelectedNodeId(null); }}>
-                    <Trash2 size={14} /> ลบกล่อง
+                  <button className="text-action-btn primary" disabled={!generatedText} onClick={exportText}>
+                    <Download size={14} /> ดาวน์โหลด .TXT
                   </button>
                 </div>
               </div>
-            ) : null}
-
-            {/* Quick Edge Editor Toolbar when Selected */}
-            {selectedEdge ? (
-              <div className="selected-node-bar edge-bar">
-                <div className="node-bar-info">
-                  <code style={{ background: "#f0bd52", color: "#0f3e2d" }}>{selectedEdge.id}</code>
-                  <strong>แก้ไขเส้นเชื่อม: {selectedEdge.source} ➔ {selectedEdge.target}</strong>
-                </div>
-                <div className="node-bar-inputs">
-                  <input
-                    value={selectedEdge.label}
-                    onChange={(e) => updateEdge(selectedEdge.id, { label: e.target.value })}
-                    placeholder="ข้อความบนเส้น (เช่น เห็นชอบ / อนุมัติ)"
+              <div className="text-stage-area">
+                <div className="text-view-card">
+                  <div className="text-view-header">
+                    <strong><FileText size={16} /> สรุปขั้นตอนจาก Flowchart เป็นเนื้อหาข้อความ</strong>
+                    <small style={{ color: "#66776f" }}>อัปเดตอัตโนมัติตามโครงสร้าง Flowchart</small>
+                  </div>
+                  <textarea
+                    className="text-view-textarea"
+                    value={generatedText}
+                    readOnly
+                    placeholder="ยังไม่มีข้อมูลขั้นตอน กรุณาอัปโหลดไฟล์หรือวางข้อความทางด้านซ้ายแล้วกดวิเคราะห์..."
+                    aria-label="ข้อความ SOP 15 หมวด"
                   />
-                  <select
-                    value={selectedEdge.style}
-                    onChange={(e) => updateEdge(selectedEdge.id, { style: e.target.value as FlowEdge["style"] })}
-                  >
-                    <option value="solid">เส้นทึบ</option>
-                    <option value="dash">เส้นประ</option>
-                  </select>
-                  <input
-                    type="color"
-                    value={selectedEdge.color || "#165B40"}
-                    onChange={(e) => updateEdge(selectedEdge.id, { color: e.target.value })}
-                    style={{ width: "36px", padding: "2px", height: "30px", cursor: "pointer" }}
-                  />
-                  <button className="del-node-btn" onClick={() => { deleteEdge(selectedEdge.id); setSelectedEdgeId(null); }}>
-                    <Trash2 size={14} /> ลบเส้นเชื่อม
-                  </button>
                 </div>
               </div>
-            ) : null}
-          </div>
+            </div>
+          )}
 
           <div className="panel data-panel">
             <div className="tabs"><button className={activePanel === "nodes" ? "active" : ""} onClick={() => setActivePanel("nodes")}>กล่อง <span>{workflow.nodes.length}</span></button><button className={activePanel === "edges" ? "active" : ""} onClick={() => setActivePanel("edges")}>เส้นเชื่อม <span>{workflow.edges.length}</span></button><button className={activePanel === "qa" ? "active" : ""} onClick={() => setActivePanel("qa")}>ตรวจคุณภาพ <span>{qa.length}</span></button></div>
@@ -845,12 +964,13 @@ export default function Home() {
           <div className="panel export-panel">
             <div className="panel-heading"><div><small>STEP 04</small><h2>ส่งออกงาน</h2></div><PackageCheck size={21} /></div>
             <p>ใช้ JSON เป็นแหล่งข้อมูลกลาง แล้วเลือกไฟล์ตามงานปลายทาง</p>
-            <button className="export-option featured" onClick={exportZip} disabled={Boolean(busy)}><span className="export-icon"><PackageCheck size={20} /></span><span><b>ชุดส่งมอบ ZIP</b><small>DOCX · PPTX · XLSX · JSON · PNG · QA</small></span><Download size={17} /></button>
+            <button className="export-option featured" onClick={exportZip} disabled={Boolean(busy)}><span className="export-icon"><PackageCheck size={20} /></span><span><b>ชุดส่งมอบ ZIP</b><small>DOCX · PPTX · XLSX · TXT · JSON · PNG · QA</small></span><Download size={17} /></button>
             <button className="export-option" onClick={exportDocx} disabled={Boolean(busy)}><span className="export-icon blue"><FileText size={20} /></span><span><b>เอกสาร Word (DOCX)</b><small>ระเบียบปฏิบัติงาน SOP 15 หมวด</small></span><Download size={17} /></button>
+            <button className="export-option" onClick={exportText} disabled={Boolean(busy)}><span className="export-icon"><FileText size={20} /></span><span><b>เอกสารข้อความ (TXT)</b><small>สรุปกระบวนงานฉบับตัวอักษร</small></span><Download size={17} /></button>
             <button className="export-option" onClick={exportPptx} disabled={Boolean(busy)}><span className="export-icon purple"><Presentation size={20} /></span><span><b>PowerPoint แก้ไขได้</b><small>Shapes + bound Connectors</small></span><Download size={17} /></button>
-            <button className="export-option" onClick={() => downloadBlob(buildWorkbook(workflow), workflowFileName(workflow, "xlsx"))}><span className="export-icon green"><FileSpreadsheet size={20} /></span><span><b>Excel Data Model</b><small>Workflow · Nodes · Edges · QA</small></span><Download size={17} /></button>
-            <button className="export-option" onClick={() => downloadBlob(workflowJsonBlob(workflow), workflowFileName(workflow, "json"))}><span className="export-icon amber"><FileJson size={20} /></span><span><b>Canonical JSON</b><small>นำเข้าโปรเจกต์อื่นได้</small></span><Download size={17} /></button>
-            <button className="export-option" onClick={async () => { if (!svgRef.current) return; downloadBlob(await svgToPng(svgRef.current), workflowFileName(workflow, "png")); }}><span className="export-icon teal"><FileText size={20} /></span><span><b>ภาพตรวจทาน PNG</b><small>ความละเอียด 2×</small></span><Download size={17} /></button>
+            <button className="export-option" onClick={exportXlsx} disabled={Boolean(busy)}><span className="export-icon green"><FileSpreadsheet size={20} /></span><span><b>Excel Data Model</b><small>Workflow · Nodes · Edges · QA</small></span><Download size={17} /></button>
+            <button className="export-option" onClick={exportJson} disabled={Boolean(busy)}><span className="export-icon amber"><FileJson size={20} /></span><span><b>Canonical JSON</b><small>นำเข้าโปรเจกต์อื่นได้</small></span><Download size={17} /></button>
+            <button className="export-option" onClick={exportPng} disabled={Boolean(busy)}><span className="export-icon teal"><FileText size={20} /></span><span><b>ภาพตรวจทาน PNG</b><small>ความละเอียด 2×</small></span><Download size={17} /></button>
             <div className="connector-guarantee"><GitBranch size={18} /><div><b>Connector Guarantee</b><span>ระบบแก้ OOXML ให้ปลายเส้นยึด Source/Target Shape จริง เมื่อลากกล่องใน PowerPoint เส้นจะขยับตาม</span></div></div>
           </div>
 

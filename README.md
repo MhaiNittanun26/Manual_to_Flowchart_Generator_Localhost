@@ -11,7 +11,7 @@ npm install
 npm run dev
 ```
 
-เปิด URL ที่แสดงใน Terminal หรือใช้ `start-local.bat` (Windows) / `start-local.sh` (macOS และ Linux)
+แอปถูกตั้งค่าให้รันบน sub path `/workflow-intelligence` จึงเปิดที่ <http://localhost:5173/workflow-intelligence> (หรือใช้ `start-local.bat` บน Windows / `start-local.sh` บน macOS และ Linux)
 
 อ่านรายละเอียดทั้งหมดได้ที่ [README_LOCALHOST.md](README_LOCALHOST.md)
 
@@ -31,3 +31,7 @@ npm run lint
 npm run build
 npm run verify:exports
 ```
+
+## Deploy หลัง nginx (sub path)
+
+แอปตั้ง `basePath: "/workflow-intelligence"` ไว้ใน [next.config.ts](next.config.ts) ทั้ง HTML, asset และ route จึงมี prefix นี้ให้อัตโนมัติ ดูขั้นตอนติดตั้งบนเซิร์ฟเวอร์ได้ที่ [README_LOCALHOST.md](README_LOCALHOST.md#deploy-บนเซิร์ฟเวอร์ที่ใช้-nginx) และบล็อก nginx สำเร็จรูปที่ [deploy/nginx-workflow-intelligence.conf](deploy/nginx-workflow-intelligence.conf)
