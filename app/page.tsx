@@ -2,6 +2,7 @@
 
 import {
   AlertTriangle,
+  ArrowLeftRight,
   ArrowRight,
   Check,
   ChevronRight,
@@ -31,7 +32,7 @@ import { buildDeliveryZip, buildDocxDocument, buildEditablePptx, buildWorkbook, 
 import { readManualFile } from "./lib/file-reader";
 import { defaultPattern, extractWorkflow, qaWorkflow } from "./lib/parser";
 import { sampleWorkflow } from "./lib/sample";
-import type { FlowEdge, FlowNode, NodeType, Workflow } from "./lib/types";
+import type { ArrowHeadShape, ArrowHeadType, FlowEdge, FlowNode, NodeType, Workflow } from "./lib/types";
 
 const typeLabels: Record<NodeType, string> = {
   start: "เริ่มต้น",
@@ -158,9 +159,32 @@ function FlowPreview({
           }}
         >
           <defs>
-            <marker id="arrow" markerWidth="8" markerHeight="8" refX="6.5" refY="3.5" orient="auto">
-              <polygon points="0 0, 7 3.5, 0 7" fill="#1b5e43" />
-            </marker>
+            {workflow.edges.map((e) => {
+              const color = selectedEdgeId === e.id ? "#f0bd52" : (e.color || "#1b5e43");
+              const shape = e.arrowShape || "triangle";
+              return (
+                <g key={e.id}>
+                  <marker id={`marker-end-${e.id}`} markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+                    {shape === "circle" ? (
+                      <circle cx="5" cy="5" r="3.5" fill={color} />
+                    ) : shape === "diamond" ? (
+                      <polygon points="0 5, 5 2, 10 5, 5 8" fill={color} />
+                    ) : (
+                      <polygon points="0 1.5, 8.5 5, 0 8.5" fill={color} />
+                    )}
+                  </marker>
+                  <marker id={`marker-start-${e.id}`} markerWidth="10" markerHeight="10" refX="2" refY="5" orient="auto">
+                    {shape === "circle" ? (
+                      <circle cx="5" cy="5" r="3.5" fill={color} />
+                    ) : shape === "diamond" ? (
+                      <polygon points="0 5, 5 2, 10 5, 5 8" fill={color} />
+                    ) : (
+                      <polygon points="10 1.5, 1.5 5, 10 8.5" fill={color} />
+                    )}
+                  </marker>
+                </g>
+              );
+            })}
             <marker id="arrow-connecting" markerWidth="8" markerHeight="8" refX="6.5" refY="3.5" orient="auto">
               <polygon points="0 0, 7 3.5, 0 7" fill="#2563eb" />
             </marker>
@@ -204,6 +228,10 @@ function FlowPreview({
             const ty = target.y;
             const mid = (sy + ty) / 2;
 
+            const arrowHead = edge.arrowHead ?? "end";
+            const markerEnd = (arrowHead === "end" || arrowHead === "both") ? `url(#marker-end-${edge.id})` : undefined;
+            const markerStart = (arrowHead === "start" || arrowHead === "both") ? `url(#marker-start-${edge.id})` : undefined;
+
             return (
               <g
                 key={edge.id}
@@ -229,7 +257,8 @@ function FlowPreview({
                   stroke={isEdgeSelected ? "#f0bd52" : edge.color || "#1b5e43"}
                   strokeWidth={isEdgeSelected ? "3.5" : "2.2"}
                   strokeDasharray={edge.style === "dash" ? "7 6" : undefined}
-                  markerEnd="url(#arrow)"
+                  markerEnd={markerEnd}
+                  markerStart={markerStart}
                 />
                 {edge.label ? (
                   <g transform={`translate(${(sx + tx) / 2}, ${mid})`}>
@@ -601,6 +630,17 @@ export default function Home() {
     setWorkflow((current) => ({ ...current, edges: current.edges.filter((edge) => edge.id !== id) }));
   }
 
+  function swapEdgeDirection(id: string) {
+    setWorkflow((current) => ({
+      ...current,
+      edges: current.edges.map((edge) => {
+        if (edge.id !== id) return edge;
+        return { ...edge, source: edge.target, target: edge.source };
+      }),
+    }));
+    setNotice("สลับทิศทางเส้นเชื่อมเรียบร้อยแล้ว");
+  }
+
   function serializedSvg() {
     return svgRef.current ? new XMLSerializer().serializeToString(svgRef.current) : undefined;
   }
@@ -858,11 +898,33 @@ export default function Home() {
                     <strong>แก้ไขเส้นเชื่อม: {selectedEdge.source} ➔ {selectedEdge.target}</strong>
                   </div>
                   <div className="node-bar-inputs">
+                    <button className="add-next-btn" onClick={() => swapEdgeDirection(selectedEdge.id)} title="สลับทิศทางเริ่มต้น-ปลายทาง">
+                      <ArrowLeftRight size={14} /> สลับทิศทาง
+                    </button>
                     <input
                       value={selectedEdge.label}
                       onChange={(e) => updateEdge(selectedEdge.id, { label: e.target.value })}
                       placeholder="ข้อความบนเส้น (เช่น เห็นชอบ / อนุมัติ)"
                     />
+                    <select
+                      value={selectedEdge.arrowHead || "end"}
+                      onChange={(e) => updateEdge(selectedEdge.id, { arrowHead: e.target.value as ArrowHeadType })}
+                      title="ตำแหน่งหัวลูกศร"
+                    >
+                      <option value="end">ลูกศรปลายทาง (➔)</option>
+                      <option value="start">ลูกศรต้นทาง (⬅)</option>
+                      <option value="both">สองทิศทาง (↔)</option>
+                      <option value="none">ไม่มีหัวลูกศร (—)</option>
+                    </select>
+                    <select
+                      value={selectedEdge.arrowShape || "triangle"}
+                      onChange={(e) => updateEdge(selectedEdge.id, { arrowShape: e.target.value as ArrowHeadShape })}
+                      title="รูปทรงหัวลูกศร"
+                    >
+                      <option value="triangle">หัวสามเหลี่ยม (▲)</option>
+                      <option value="circle">หัววงกลม (●)</option>
+                      <option value="diamond">หัวสี่เหลี่ยม (◆)</option>
+                    </select>
                     <select
                       value={selectedEdge.style}
                       onChange={(e) => updateEdge(selectedEdge.id, { style: e.target.value as FlowEdge["style"] })}
@@ -950,10 +1012,36 @@ export default function Home() {
 
             {activePanel === "edges" ? (
               <div className="table-wrap">
-                <table><thead><tr><th>รหัสเส้น</th><th>Source</th><th>Target</th><th>ข้อความกำกับ</th><th>รูปแบบ</th><th>สี</th><th /></tr></thead>
+                <table><thead><tr><th>รหัสเส้น</th><th>สลับ</th><th>Source</th><th>Target</th><th>หัวลูกศร</th><th>รูปทรง</th><th>ข้อความกำกับ</th><th>รูปแบบ</th><th>สี</th><th /></tr></thead>
                   <tbody>{workflow.edges.map((edge) => (
                     <tr key={edge.id}>
-                      <td><code>{edge.id}</code></td><td><select value={edge.source} onChange={(event) => updateEdge(edge.id, { source: event.target.value })}>{workflow.nodes.map((node) => <option key={node.id}>{node.id}</option>)}</select></td><td><select value={edge.target} onChange={(event) => updateEdge(edge.id, { target: event.target.value })}>{workflow.nodes.map((node) => <option key={node.id}>{node.id}</option>)}</select></td><td><input value={edge.label} onChange={(event) => updateEdge(edge.id, { label: event.target.value })} /></td><td><select value={edge.style} onChange={(event) => updateEdge(edge.id, { style: event.target.value as FlowEdge["style"] })}><option value="solid">เส้นทึบ</option><option value="dash">เส้นประ</option></select></td><td><input type="color" value={edge.color} onChange={(event) => updateEdge(edge.id, { color: event.target.value })} /></td><td><button className="row-delete" onClick={() => deleteEdge(edge.id)} aria-label={`ลบ ${edge.id}`}><Trash2 size={15} /></button></td>
+                      <td><code>{edge.id}</code></td>
+                      <td>
+                        <button className="row-delete" style={{ color: "#165B40" }} onClick={() => swapEdgeDirection(edge.id)} title="สลับทิศทาง">
+                          <ArrowLeftRight size={14} />
+                        </button>
+                      </td>
+                      <td><select value={edge.source} onChange={(event) => updateEdge(edge.id, { source: event.target.value })}>{workflow.nodes.map((node) => <option key={node.id}>{node.id}</option>)}</select></td>
+                      <td><select value={edge.target} onChange={(event) => updateEdge(edge.id, { target: event.target.value })}>{workflow.nodes.map((node) => <option key={node.id}>{node.id}</option>)}</select></td>
+                      <td>
+                        <select value={edge.arrowHead || "end"} onChange={(event) => updateEdge(edge.id, { arrowHead: event.target.value as ArrowHeadType })}>
+                          <option value="end">ปลายทาง (➔)</option>
+                          <option value="start">ต้นทาง (⬅)</option>
+                          <option value="both">สองทาง (↔)</option>
+                          <option value="none">ไม่มี (—)</option>
+                        </select>
+                      </td>
+                      <td>
+                        <select value={edge.arrowShape || "triangle"} onChange={(event) => updateEdge(edge.id, { arrowShape: event.target.value as ArrowHeadShape })}>
+                          <option value="triangle">สามเหลี่ยม</option>
+                          <option value="circle">วงกลม</option>
+                          <option value="diamond">สี่เหลี่ยม</option>
+                        </select>
+                      </td>
+                      <td><input value={edge.label} onChange={(event) => updateEdge(edge.id, { label: event.target.value })} /></td>
+                      <td><select value={edge.style} onChange={(event) => updateEdge(edge.id, { style: event.target.value as FlowEdge["style"] })}><option value="solid">เส้นทึบ</option><option value="dash">เส้นประ</option></select></td>
+                      <td><input type="color" value={edge.color} onChange={(event) => updateEdge(edge.id, { color: event.target.value })} /></td>
+                      <td><button className="row-delete" onClick={() => deleteEdge(edge.id)} aria-label={`ลบ ${edge.id}`}><Trash2 size={15} /></button></td>
                     </tr>
                   ))}</tbody>
                 </table><button className="add-row" onClick={addEdge}><CirclePlus size={16} /> เพิ่มเส้นเชื่อม</button>

@@ -1,5 +1,7 @@
 export type NodeType = "start" | "process" | "decision" | "document" | "end" | "note";
 export type LineStyle = "solid" | "dash";
+export type ArrowHeadType = "end" | "start" | "both" | "none";
+export type ArrowHeadShape = "triangle" | "circle" | "diamond";
 
 export interface FlowNode {
   id: string;
@@ -20,6 +22,8 @@ export interface FlowEdge {
   label: string;
   color: string;
   style: LineStyle;
+  arrowHead?: ArrowHeadType;
+  arrowShape?: ArrowHeadShape;
   sourceSide: "top" | "right" | "bottom" | "left";
   targetSide: "top" | "right" | "bottom" | "left";
 }

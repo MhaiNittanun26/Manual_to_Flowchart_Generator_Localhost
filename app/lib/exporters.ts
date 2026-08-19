@@ -102,13 +102,27 @@ function addLineShape(slide: PptxGenJS.Slide, pptx: PptxGenJS, edge: FlowEdge, o
   const sy = from.y + from.h;
   const tx = to.x + to.w / 2;
   const ty = to.y;
+
+  const arrowHead = edge.arrowHead ?? "end";
+  const shape = edge.arrowShape ?? "triangle";
+  const pptxShape = shape === "circle" ? "oval" : shape === "diamond" ? "diamond" : "triangle";
+
+  const endArrowType = (arrowHead === "end" || arrowHead === "both") ? pptxShape : "none";
+  const beginArrowType = (arrowHead === "start" || arrowHead === "both") ? pptxShape : "none";
+
   slide.addShape(pptx.ShapeType.line, {
     objectName,
     x: sx,
     y: sy,
     w: tx - sx,
     h: ty - sy,
-    line: { color: edge.color.replace("#", ""), width: 1.5, dashType: edge.style === "dash" ? "dash" : "solid", endArrowType: "triangle" },
+    line: { 
+      color: edge.color.replace("#", ""), 
+      width: 1.5, 
+      dashType: edge.style === "dash" ? "dash" : "solid", 
+      endArrowType,
+      beginArrowType,
+    },
   });
   if (edge.label) {
     slide.addText(edge.label, { x: Math.min(sx, tx) + 0.03, y: (sy + ty) / 2 - 0.16, w: Math.max(Math.abs(tx - sx), 0.8), h: 0.3, fontFace: "TH SarabunPSK", fontSize: 11, color: "4B5563", fill: { color: "FFFFFF", transparency: 8 }, margin: 0.02, breakLine: false });
