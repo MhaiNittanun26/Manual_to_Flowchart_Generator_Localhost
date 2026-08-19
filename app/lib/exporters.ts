@@ -236,7 +236,7 @@ export async function buildDocxDocument(workflow: Workflow): Promise<Blob> {
       font: "TH SarabunPSK",
       size: options.size ?? 32,
       bold: options.bold,
-      italic: options.italic,
+      italics: options.italic,
       color: options.color ?? "203D31",
     });
 
@@ -330,7 +330,7 @@ export async function buildDocxDocument(workflow: Workflow): Promise<Blob> {
                 children: ["ลำดับ", "รหัส", "ขั้นตอนการดำเนินงาน", "ผู้รับผิดชอบ", "เอกสาร/หลักฐาน"].map(
                   (h) =>
                     new TableCell({
-                      children: [fontRun(h, { bold: true, size: 28, color: "FFFFFF" })],
+                      children: [new Paragraph({ children: [fontRun(h, { bold: true, size: 28, color: "FFFFFF" })] })],
                       shading: { fill: "155B40" },
                     })
                 ),
@@ -339,11 +339,11 @@ export async function buildDocxDocument(workflow: Workflow): Promise<Blob> {
                 (node, i) =>
                   new TableRow({
                     children: [
-                      new TableCell({ children: [fontRun(String(i + 1), { size: 28 })] }),
-                      new TableCell({ children: [fontRun(node.id, { bold: true, size: 28, color: "155B40" })] }),
-                      new TableCell({ children: [fontRun(node.text, { size: 28 })] }),
-                      new TableCell({ children: [fontRun(node.lane, { size: 28 })] }),
-                      new TableCell({ children: [fontRun(node.documents || "-", { size: 28 })] }),
+                      new TableCell({ children: [new Paragraph({ children: [fontRun(String(i + 1), { size: 28 })] })] }),
+                      new TableCell({ children: [new Paragraph({ children: [fontRun(node.id, { bold: true, size: 28, color: "155B40" })] })] }),
+                      new TableCell({ children: [new Paragraph({ children: [fontRun(node.text, { size: 28 })] })] }),
+                      new TableCell({ children: [new Paragraph({ children: [fontRun(node.lane, { size: 28 })] })] }),
+                      new TableCell({ children: [new Paragraph({ children: [fontRun(node.documents || "-", { size: 28 })] })] }),
                     ],
                   })
               ),
@@ -361,7 +361,7 @@ export async function buildDocxDocument(workflow: Workflow): Promise<Blob> {
                 children: ["รายการตรวจเช็ก", "ระดับ", "สถานะการตรวจสอบ"].map(
                   (h) =>
                     new TableCell({
-                      children: [fontRun(h, { bold: true, size: 28, color: "FFFFFF" })],
+                      children: [new Paragraph({ children: [fontRun(h, { bold: true, size: 28, color: "FFFFFF" })] })],
                       shading: { fill: "2A5340" },
                     })
                 ),
@@ -370,9 +370,9 @@ export async function buildDocxDocument(workflow: Workflow): Promise<Blob> {
                 (item) =>
                   new TableRow({
                     children: [
-                      new TableCell({ children: [fontRun(item.text, { size: 28 })] }),
-                      new TableCell({ children: [fontRun(item.level.toUpperCase(), { bold: true, size: 28, color: item.level === "pass" ? "155B40" : "A13E3E" })] }),
-                      new TableCell({ children: [fontRun(item.level === "pass" ? "ผ่านเกณฑ์มาตรฐาน" : "ควรทบทวน/ปรับปรุง", { size: 28 })] }),
+                      new TableCell({ children: [new Paragraph({ children: [fontRun(item.text, { size: 28 })] })] }),
+                      new TableCell({ children: [new Paragraph({ children: [fontRun(item.level.toUpperCase(), { bold: true, size: 28, color: item.level === "pass" ? "155B40" : "A13E3E" })] })] }),
+                      new TableCell({ children: [new Paragraph({ children: [fontRun(item.level === "pass" ? "ผ่านเกณฑ์มาตรฐาน" : "ควรทบทวน/ปรับปรุง", { size: 28 })] })] }),
                     ],
                   })
               ),
@@ -398,6 +398,100 @@ export async function buildDocxDocument(workflow: Workflow): Promise<Blob> {
   return Packer.toBlob(doc);
 }
 
+export function buildTextContent(workflow: Workflow): string {
+  if (!workflow.nodes || workflow.nodes.length === 0) {
+    return "";
+  }
+  const qa = qaWorkflow(workflow);
+  const lines: string[] = [];
+
+  const addHeader = (text: string) => {
+    lines.push("");
+    lines.push("========================================");
+    lines.push(text);
+    lines.push("========================================");
+    lines.push("");
+  };
+
+  const addLine = (text: string) => {
+    lines.push(text);
+  };
+
+  lines.push("เอกสารระเบียบปฏิบัติงานมาตรฐาน (SOP)");
+  lines.push(workflow.name);
+  lines.push(`รหัสกระบวนงาน: ${workflow.id}`);
+  lines.push(`แหล่งข้อมูลอ้างอิง: ${workflow.sourceFile}`);
+  lines.push(`วันที่จัดทำ: ${workflow.createdAt}`);
+
+  addHeader("1. หน้าปกเอกสาร");
+  addLine(`เอกสารระเบียบขั้นตอนการปฏิบัติงานเรื่อง "${workflow.name}" ฉบับมาตรฐานการปฏิบัติงาน (Standard Operating Procedure: SOP)`);
+
+  addHeader("2. ชื่อระเบียบขั้นตอน");
+  addLine(`“ระเบียบขั้นตอนว่าด้วย ${workflow.name}”`);
+
+  addHeader("3. หลักการและเหตุผล");
+  addLine(
+    workflow.sourceText
+      ? `อ้างอิงจากต้นฉบับ: ${workflow.sourceText.slice(0, 300)}...`
+      : "เพื่อให้การดำเนินงานตามกระบวนงานมีความชัดเจน เป็นมาตรฐานเดียวกัน มีความโปร่งใส ตรวจสอบได้ และเกิดประสิทธิภาพสูงสุดในการปฏิบัติงาน"
+  );
+
+  addHeader("4. วัตถุประสงค์");
+  addLine(`1. เพื่อกำหนดขั้นตอนการปฏิบัติงานสำหรับ ${workflow.name} ให้เป็นมาตรฐานเดียวกัน`);
+  addLine("2. เพื่อระบุผู้รับผิดชอบในแต่ละขั้นตอน (Swimlanes) และเอกสาร/หลักฐานอ้างอิงอย่างชัดเจน");
+  addLine("3. เพื่อใช้เป็นคู่มืออ้างอิงในการตรวจสอบและฝึกอบรมบุคลากร");
+
+  addHeader("5. ขอบเขตการดำเนินงาน");
+  addLine(`ครอบคลุมขั้นตอนการทำงานตั้งแต่เริ่มต้นจนสิ้นสุดกระบวนงาน โดยเกี่ยวข้องกับหน่วยงาน/ผู้รับผิดชอบ: ${workflow.lanes.join(", ")}`);
+
+  addHeader("6. คำนิยามหรือคำอธิบายที่เกี่ยวข้อง");
+  workflow.lanes.forEach((lane) => addLine(`• ${lane}: หน่วยงานหรือผู้รับผิดชอบหลักในกระบวนงาน`));
+
+  addHeader("7. หน่วยงานและผู้รับผิดชอบ (Swimlanes)");
+  workflow.lanes.forEach((lane, i) => addLine(`${i + 1}. ${lane}: ดำเนินการขั้นตอนที่ได้รับมอบหมายตามโครงสร้าง Workflow`));
+
+  addHeader("8. หน้าที่และความรับผิดชอบ");
+  workflow.nodes.forEach((node) => addLine(`• [${node.id}] (${node.lane}): ${node.text}`));
+
+  addHeader("9. ขั้นตอนการดำเนินงานอย่างละเอียด");
+  workflow.nodes.forEach((node, i) => addLine(`ขั้นตอนที่ ${i + 1} [${node.id}]: ${node.text} (ผู้รับผิดชอบ: ${node.lane}${node.documents ? ` · เอกสาร: ${node.documents}` : ""})`));
+
+  addHeader("10. ตารางสรุปกระบวนงาน (Flowchart Summary Table)");
+  addLine("ลำดับ | รหัส | ขั้นตอนการดำเนินงาน | ผู้รับผิดชอบ | เอกสาร/หลักฐาน");
+  addLine("--------------------------------------------------------------------------------");
+  workflow.nodes.forEach((node, i) => {
+    addLine(`${i + 1} | ${node.id} | ${node.text} | ${node.lane} | ${node.documents || "-"}`);
+  });
+
+  addHeader("11. ความเชื่อมโยงและเงื่อนไขเส้นเชื่อม (Edges)");
+  workflow.edges.forEach((edge) => addLine(`• เส้นเชื่อม [${edge.id}]: จาก ${edge.source} ➔ ไปยัง ${edge.target}${edge.label ? ` (เงื่อนไข: "${edge.label}")` : ""}`));
+
+  addHeader("12. ตารางตรวจสอบคุณภาพและความสมบูรณ์ (QA Audit)");
+  addLine("รายการตรวจเช็ก | ระดับ | สถานะการตรวจสอบ");
+  addLine("--------------------------------------------------------------------------------");
+  qa.forEach((item) => {
+    addLine(`${item.text} | ${item.level.toUpperCase()} | ${item.level === "pass" ? "ผ่านเกณฑ์มาตรฐาน" : "ควรทบทวน/ปรับปรุง"}`);
+  });
+
+  addHeader("13. แบบฟอร์มและเอกสารอ้างอิง");
+  addLine("• แบบฟอร์มการปฏิบัติงานฉบับมาตรฐาน");
+  addLine("• เอกสารหลักฐานที่เกี่ยวข้องในแต่ละขั้นตอน");
+
+  addHeader("14. กฎหมาย ระเบียบ และข้อบังคับที่เกี่ยวข้อง");
+  addLine("• ระเบียบมหาวิทยาลัยเกี่ยวกับการบริหารงานสารบรรณและการปฏิบัติราชการ");
+  addLine("• ข้อบังคับและประกาศที่เกี่ยวข้องกับกระบวนงาน");
+
+  addHeader("15. ดรรชนีคำสำคัญและประวัติการแก้ไข");
+  addLine(`คำสำคัญ: Flowchart, SOP, ${workflow.lanes.join(", ")}, ${workflow.name}`);
+  addLine(`ประวัติการแก้ไข: ฉบับปรับปรุงล่าสุด ณ วันที่ ${workflow.createdAt} สร้างโดยระบบ Manual-to-Flowchart Generator`);
+
+  return lines.join("\n");
+}
+
+export function buildTextBlob(workflow: Workflow): Blob {
+  return new Blob([buildTextContent(workflow)], { type: "text/plain;charset=utf-8" });
+}
+
 export async function buildDeliveryZip(workflow: Workflow, svgText?: string, pngBlob?: Blob) {
   const zip = new JSZip();
   const safeName = sanitizeFileName(workflow.name);
@@ -406,6 +500,7 @@ export async function buildDeliveryZip(workflow: Workflow, svgText?: string, png
 
   zip.file(`${safeName}.json`, workflowJsonBlob(workflow));
   zip.file(`${safeName}.docx`, docxBlob);
+  zip.file(`${safeName}.txt`, buildTextBlob(workflow));
   zip.file(`${safeName}.xlsx`, buildWorkbook(workflow));
   zip.file(`${safeName}.pptx`, pptx.blob);
   if (svgText) zip.file(`${safeName}_preview.svg`, svgText);
@@ -419,6 +514,7 @@ export async function buildDeliveryZip(workflow: Workflow, svgText?: string, png
   zip.file("README_OUTPUT.txt", [
     "ชุดผลลัพธ์จาก Manual-to-Flowchart Generator",
     "- DOCX: เอกสารระเบียบปฏิบัติงานมาตรฐาน (SOP 15 หมวด)",
+    "- TXT: ข้อความสรุปกระบวนงานฉบับตัวอักษรธรรมดา",
     "- PPTX: Flowchart แก้ไขได้ และ Connector ผูกกับ Connection Point ของ Shape",
     "- XLSX: ตาราง Workflow / Nodes / Edges / QA",
     "- JSON: แหล่งข้อมูลกลาง",

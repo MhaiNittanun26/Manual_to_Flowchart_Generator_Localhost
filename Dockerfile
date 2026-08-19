@@ -1,12 +1,27 @@
-# Production Nginx Container
-FROM nginx:alpine
+FROM node:22-alpine
 
-# Copy custom Nginx configuration
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+WORKDIR /app
 
-# Copy pre-built production static files directly to Nginx web root
-COPY dist/client /usr/share/nginx/html
+# Copy package files
+COPY package*.json ./
 
-EXPOSE 80
+# Disable puppeteer download
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
-CMD ["nginx", "-g", "daemon off;"]
+# Try to force IPv4 for npm to avoid Alpine network freezes
+RUN npm config set fetch-retry-maxtimeout 120000 && \
+    npm config set fetch-retries 5 && \
+    npm install --loglevel=verbose
+
+# Copy all application files
+COPY . .
+
+# Install bash and coreutils which are required by the build script
+RUN apk add --no-cache bash coreutils
+
+# Build the application
+RUN npm run build
+
+# Start the Node.js server
+CMD ["npm", "start"]
