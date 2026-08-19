@@ -1,27 +1,23 @@
+# Production container: builds the app and serves it with the vinext production
+# server. Nginx on the host proxies /workflow-intelligence to this port
+# (see deploy/nginx-workflow-intelligence.conf).
 FROM node:22-alpine
 
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# basePath is baked in at build time, so it must be set before `vinext build`.
+ARG BASE_PATH=/workflow-intelligence
+ENV BASE_PATH=${BASE_PATH}
 
-# Disable puppeteer download
-ENV PUPPETEER_SKIP_DOWNLOAD=true
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+COPY package.json package-lock.json .npmrc ./
+# vinext/vite are devDependencies but are required to build and to serve.
+RUN npm ci --include=dev
 
-# Try to force IPv4 for npm to avoid Alpine network freezes
-RUN npm config set fetch-retry-maxtimeout 120000 && \
-    npm config set fetch-retries 5 && \
-    npm install --loglevel=verbose
-
-# Copy all application files
 COPY . .
+RUN npx vinext build
 
-# Install bash and coreutils which are required by the build script
-RUN apk add --no-cache bash coreutils
+ENV NODE_ENV=production
+ENV PORT=3000
+EXPOSE 3000
 
-# Build the application
-RUN npm run build
-
-# Start the Node.js server
-CMD ["npm", "start"]
+CMD ["node", "server/node-server.mjs"]

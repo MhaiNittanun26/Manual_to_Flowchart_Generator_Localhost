@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+const basePath = process.env.BASE_PATH ?? "/workflow-intelligence";
+
 const developmentPreviewMeta =
   /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
 
@@ -10,7 +12,7 @@ test("renders development preview metadata", async () => {
   const { default: worker } = await import(workerUrl.href);
 
   const response = await worker.fetch(
-    new Request("http://localhost/", {
+    new Request(`http://localhost${basePath}`, {
       headers: { accept: "text/html" },
     }),
     {
