@@ -772,12 +772,16 @@ export default function Home() {
 
         <section className="main-stage">
           <div className="panel stage-toolbar">
-            <div className="workflow-title-block"><span className="workflow-id">{workflow.id}</span><input value={workflow.name} onChange={(event) => setWorkflow((current) => ({ ...current, name: event.target.value }))} aria-label="ชื่อ Workflow" /><small>วิเคราะห์แบบ {workflow.analysisMode === "pattern" ? "Pattern offline" : "ตัวอย่างระบบ"}</small></div>
-            <div className="mode-switcher">
-              <button className={`mode-btn ${viewMode === "flow" ? "active" : ""}`} onClick={() => setViewMode("flow")} title="แสดงผลลัพธ์เป็นไดอะแกรม Flowchart"><GitBranch size={15} /> แปลง Text ➔ Flow (Diagram)</button>
-              <button className={`mode-btn ${viewMode === "text" ? "active" : ""}`} onClick={() => setViewMode("text")} title="แสดงผลลัพธ์เป็นข้อความระเบียบปฏิบัติงาน SOP"><FileText size={15} /> แปลง Flow ➔ Text (SOP 15 หมวด)</button>
+            <div className="stage-toolbar-top">
+              <div className="workflow-title-block"><span className="workflow-id">{workflow.id}</span><input value={workflow.name} onChange={(event) => setWorkflow((current) => ({ ...current, name: event.target.value }))} aria-label="ชื่อ Workflow" /><small>วิเคราะห์แบบ {workflow.analysisMode === "pattern" ? "Pattern offline" : "ตัวอย่างระบบ"}</small></div>
+              <div className="qa-summary"><span className={failures ? "qa-fail" : "qa-pass"}>{failures ? <AlertTriangle size={14} /> : <Check size={14} />}{failures ? `${failures} Fail` : "โครงสร้างผ่าน"}</span><span className="qa-warn">{warnings} จุดควรทบทวน</span></div>
             </div>
-            <div className="qa-summary"><span className={failures ? "qa-fail" : "qa-pass"}>{failures ? <AlertTriangle size={14} /> : <Check size={14} />}{failures ? `${failures} Fail` : "โครงสร้างผ่าน"}</span><span className="qa-warn">{warnings} จุดควรทบทวน</span></div>
+            <div className="stage-toolbar-bottom">
+              <div className="mode-switcher">
+                <button className={`mode-btn ${viewMode === "flow" ? "active" : ""}`} onClick={() => setViewMode("flow")} title="แสดงผลลัพธ์เป็นไดอะแกรม Flowchart"><GitBranch size={15} /> แปลง Text ➔ Flow (Diagram)</button>
+                <button className={`mode-btn ${viewMode === "text" ? "active" : ""}`} onClick={() => setViewMode("text")} title="แสดงผลลัพธ์เป็นข้อความระเบียบปฏิบัติงาน SOP"><FileText size={15} /> แปลง Flow ➔ Text (SOP 15 หมวด)</button>
+              </div>
+            </div>
           </div>
 
           {viewMode === "flow" ? (
