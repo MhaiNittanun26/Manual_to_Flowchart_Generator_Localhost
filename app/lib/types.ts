@@ -1,5 +1,5 @@
-export type NodeType = "start" | "process" | "decision" | "document" | "end" | "note";
-export type LineStyle = "solid" | "dash";
+export type NodeType = "start" | "process" | "decision" | "document" | "end" | "note" | "option" | "executive";
+export type LineStyle = "solid" | "dash" | "dot";
 
 export interface FlowNode {
   id: string;
@@ -13,6 +13,8 @@ export interface FlowNode {
   order: number;
 }
 
+export type ArrowHeadType = "end" | "start" | "both" | "none";
+
 export interface FlowEdge {
   id: string;
   source: string;
@@ -20,8 +22,10 @@ export interface FlowEdge {
   label: string;
   color: string;
   style: LineStyle;
-  sourceSide: "top" | "right" | "bottom" | "left";
-  targetSide: "top" | "right" | "bottom" | "left";
+  sourceSide?: "top" | "right" | "bottom" | "left";
+  targetSide?: "top" | "right" | "bottom" | "left";
+  arrowHead?: ArrowHeadType;
+  midOffset?: number;
 }
 
 export interface Workflow {

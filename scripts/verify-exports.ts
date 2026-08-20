@@ -1,4 +1,6 @@
 import { writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import JSZip from "jszip";
 import { buildEditablePptx, buildWorkbook, workflowJsonBlob } from "../app/lib/exporters";
 import { sampleWorkflow } from "../app/lib/sample";
@@ -25,15 +27,16 @@ async function verifyPowerPoint(workflow: Workflow, output: string) {
   return { slides: result.pageCount, connectorShapes, startConnections, endConnections, pptxBytes: buffer.byteLength };
 }
 
-const singlePage = await verifyPowerPoint(sampleWorkflow, "/tmp/manual-flow-connector-test.pptx");
+const tmpDir = os.tmpdir();
+const singlePage = await verifyPowerPoint(sampleWorkflow, path.join(tmpDir, "manual-flow-connector-test.pptx"));
 const longWorkflow: Workflow = {
   ...sampleWorkflow,
   id: "WT",
   name: "ทดสอบ Connector ข้ามหน้า",
-  nodes: Array.from({ length: 12 }, (_, index) => ({ ...sampleWorkflow.nodes[index % sampleWorkflow.nodes.length], id: `WT-N${String(index + 1).padStart(2, "0")}`, order: index + 1, type: index === 0 ? "start" : index === 11 ? "end" : "process" })),
-  edges: Array.from({ length: 11 }, (_, index) => ({ ...sampleWorkflow.edges[index % sampleWorkflow.edges.length], id: `WT-E${String(index + 1).padStart(2, "0")}`, source: `WT-N${String(index + 1).padStart(2, "0")}`, target: `WT-N${String(index + 2).padStart(2, "0")}` })),
+  nodes: Array.from({ length: 20 }, (_, index) => ({ ...sampleWorkflow.nodes[index % sampleWorkflow.nodes.length], id: `WT-N${String(index + 1).padStart(2, "0")}`, order: index + 1, type: index === 0 ? "start" : index === 19 ? "end" : "process" })),
+  edges: Array.from({ length: 19 }, (_, index) => ({ ...sampleWorkflow.edges[index % sampleWorkflow.edges.length], id: `WT-E${String(index + 1).padStart(2, "0")}`, source: `WT-N${String(index + 1).padStart(2, "0")}`, target: `WT-N${String(index + 2).padStart(2, "0")}` })),
 };
-const multiPage = await verifyPowerPoint(longWorkflow, "/tmp/manual-flow-connector-multipage-test.pptx");
+const multiPage = await verifyPowerPoint(longWorkflow, path.join(tmpDir, "manual-flow-connector-multipage-test.pptx"));
 if (multiPage.slides !== 2) throw new Error(`Expected 2 slides, received ${multiPage.slides}`);
 if ((await buildWorkbook(sampleWorkflow).arrayBuffer()).byteLength < 1000) throw new Error("Workbook export too small");
 if ((await workflowJsonBlob(sampleWorkflow).arrayBuffer()).byteLength < 1000) throw new Error("JSON export too small");

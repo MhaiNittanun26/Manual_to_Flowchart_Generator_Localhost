@@ -31,15 +31,17 @@ import { buildDeliveryZip, buildDocxDocument, buildEditablePptx, buildWorkbook, 
 import { readManualFile } from "./lib/file-reader";
 import { defaultPattern, extractWorkflow, qaWorkflow } from "./lib/parser";
 import { sampleWorkflow } from "./lib/sample";
-import type { FlowEdge, FlowNode, NodeType, Workflow } from "./lib/types";
+import type { ArrowHeadType, FlowEdge, FlowNode, NodeType, Workflow } from "./lib/types";
 
 const typeLabels: Record<NodeType, string> = {
-  start: "เริ่มต้น",
-  process: "ขั้นตอน",
-  decision: "ตัดสินใจ",
-  document: "เอกสาร",
-  end: "สิ้นสุด",
-  note: "หมายเหตุ",
+  process: "ขั้นตอน (สี่เหลี่ยม)",
+  decision: "ตัดสินใจ (เพชร/Diamond)",
+  document: "เอกสาร (ทรงพับมุม)",
+  executive: "ผู้บริหาร (สี่เหลี่ยมคางหมู)",
+  start: "เริ่มต้น (Pill)",
+  end: "สิ้นสุด (แดง)",
+  option: "ทางเลือก (Badge)",
+  note: "หมายเหตุ (เส้นประ)",
 };
 
 function cloneWorkflow(workflow: Workflow): Workflow {
@@ -60,6 +62,7 @@ function FlowPreview({
   onUpdateNode,
   onDeleteNode,
   onAddNodeAfter,
+  onUpdateEdge,
 }: {
   workflow: Workflow;
   svgRef: React.RefObject<SVGSVGElement | null>;
@@ -74,40 +77,225 @@ function FlowPreview({
   onUpdateNode: (id: string, patch: Partial<FlowNode>) => void;
   onDeleteNode: (id: string) => void;
   onAddNodeAfter: (id: string) => void;
+  onUpdateEdge: (id: string, patch: Partial<FlowEdge>) => void;
 }) {
   const [zoom, setZoom] = useState(1);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
 
+  // Interactive Node Drag & Line Bend States
+  const [nodeOffsets, setNodeOffsets] = useState<Record<string, { x: number; y: number }>>({});
+  const [edgeOffsets, setEdgeOffsets] = useState<Record<string, number>>({});
+  const [dragState, setDragState] = useState<{
+    nodeId: string;
+    startX: number;
+    startY: number;
+    initialOffsetX: number;
+    initialOffsetY: number;
+  } | null>(null);
+  const [edgeDragState, setEdgeDragState] = useState<{
+    edgeId: string;
+    startY: number;
+    initialOffset: number;
+  } | null>(null);
+
   const laneCount = Math.max(1, workflow.lanes.length);
   const laneWidth = 860 / laneCount;
-  const baseNodeWidth = Math.min(220, laneWidth - 30);
+  const baseNodeWidth = Math.min(195, laneWidth - 20);
 
-  // Dynamic Height Math
-  const positions = new Map<string, { x: number; y: number; w: number; h: number }>();
-  let currentY = 124;
+  // Preset row levels for sample workflow nodes
+  const sampleLevels: Record<string, number> = {
+    "W1-N01": 1, "W1-N13": 1,
+    "W1-N02": 2, "W1-N03": 2, "W1-N04": 2, "W1-N05": 2, "W1-N08": 2, "W1-N12": 2,
+    "W1-N06": 3, "W1-N09": 3, "W1-N11": 3,
+    "W1-N07": 4, "W1-N10": 4,
+    "W1-N14": 5,
+    "W1-N15": 6, "W1-N16": 6, "W1-N17": 6, "W1-N23": 6,
+    "W1-N18": 7, "W1-N22": 7,
+    "W1-N19": 8,
+    "W1-N20": 9, "W1-N21": 9,
+    "W1-N24": 10, "W1-N25": 10,
+    "W1-N26": 11,
+    "W1-N27": 12, "W1-N28": 12,
+    "W1-N29": 13,
+    "W1-N30": 14, "W1-N31": 14,
+  };
 
+  const nodeLevels = new Map<string, number>();
+  const visited = new Set<string>();
+
+  workflow.nodes.forEach((node, idx) => {
+    if (sampleLevels[node.id]) {
+      nodeLevels.set(node.id, sampleLevels[node.id]);
+    } else {
+      const laneNodes = workflow.nodes.filter(n => n.lane === node.lane && visited.has(n.id));
+      const lastLevel = laneNodes.length > 0 ? Math.max(...laneNodes.map(n => nodeLevels.get(n.id) || 1)) : 0;
+      nodeLevels.set(node.id, Math.max(lastLevel + 1, idx + 1));
+    }
+    visited.add(node.id);
+  });
+
+  const nodeSizes = new Map<string, { w: number; h: number }>();
+  workflow.nodes.forEach((node) => {
+    const isOption = node.type === "option";
+    const isStart = node.type === "start";
+    const isEnd = node.type === "end";
+    const textLines = node.text ? node.text.split("\n").length : 1;
+
+    let w = baseNodeWidth;
+    let h = 58;
+
+    if (isOption) {
+      w = Math.min(150, baseNodeWidth - 10);
+      h = 36;
+    } else if (isStart || isEnd) {
+      w = Math.min(180, baseNodeWidth);
+      h = 48;
+    } else if (textLines > 5) {
+      w = baseNodeWidth + 10;
+      h = Math.max(160, 42 + textLines * 19);
+    } else if (textLines > 1) {
+      h = Math.max(78, 38 + textLines * 18);
+    } else {
+      h = 56;
+    }
+    nodeSizes.set(node.id, { w, h });
+  });
+
+  const levelMaxH = new Map<number, number>();
+  workflow.nodes.forEach((node) => {
+    const lvl = nodeLevels.get(node.id) || 1;
+    const size = nodeSizes.get(node.id)!;
+    levelMaxH.set(lvl, Math.max(levelMaxH.get(lvl) || 0, size.h));
+  });
+
+  const levelY = new Map<number, number>();
+  let runningY = 115;
+  const sortedLevels = Array.from(new Set(Array.from(nodeLevels.values()))).sort((a, b) => a - b);
+  sortedLevels.forEach((lvl) => {
+    levelY.set(lvl, runningY);
+    const maxH = levelMaxH.get(lvl) || 58;
+    runningY += maxH + 42;
+  });
+
+  const basePositions = new Map<string, { x: number; y: number; w: number; h: number }>();
   workflow.nodes.forEach((node) => {
     const laneIndex = Math.max(0, workflow.lanes.indexOf(node.lane));
-    const textLen = node.text ? node.text.length : 8;
-    const isDecision = node.type === "decision";
+    const lvl = nodeLevels.get(node.id) || 1;
+    const size = nodeSizes.get(node.id)!;
+    const x = 50 + laneIndex * laneWidth + (laneWidth - size.w) / 2;
+    const y = levelY.get(lvl) || 115;
+    basePositions.set(node.id, { x, y, w: size.w, h: size.h });
+  });
 
-    const lineCap = isDecision ? 15 : 22;
-    const estLines = Math.max(1, Math.ceil(textLen / lineCap));
+  // Strict Collision Avoidance Pass
+  workflow.lanes.forEach((lane) => {
+    const laneNodes = workflow.nodes
+      .filter((n) => n.lane === lane)
+      .sort((a, b) => (basePositions.get(a.id)?.y || 0) - (basePositions.get(b.id)?.y || 0));
 
-    const w = isDecision ? Math.min(laneWidth - 16, Math.max(baseNodeWidth + 24, 190)) : baseNodeWidth;
-    const h = isDecision ? Math.max(94, 52 + estLines * 22) : Math.max(68, 42 + estLines * 20);
+    for (let i = 1; i < laneNodes.length; i++) {
+      const prevPos = basePositions.get(laneNodes[i - 1].id)!;
+      const currPos = basePositions.get(laneNodes[i].id)!;
+      const minRequiredY = prevPos.y + prevPos.h + 28;
+      if (currPos.y < minRequiredY) {
+        currPos.y = minRequiredY;
+      }
+    }
+  });
 
-    const x = 70 + laneIndex * laneWidth + (laneWidth - w) / 2;
-    const y = currentY;
-
-    positions.set(node.id, { x, y, w, h });
-    currentY += h + 52;
+  // Combine base positions with user dragging offsets
+  const positions = new Map<string, { x: number; y: number; w: number; h: number }>();
+  workflow.nodes.forEach((node) => {
+    const basePos = basePositions.get(node.id)!;
+    const offset = nodeOffsets[node.id] || { x: 0, y: 0 };
+    positions.set(node.id, {
+      x: basePos.x + offset.x,
+      y: basePos.y + offset.y,
+      w: basePos.w,
+      h: basePos.h,
+    });
   });
 
   const width = 960;
-  const height = Math.max(620, currentY + 60);
+  const maxY = Math.max(700, ...Array.from(positions.values()).map((p) => p.y + p.h));
+  const height = maxY + 90;
 
   const sourcePos = connectingSourceId ? positions.get(connectingSourceId) : null;
+
+  // Helper for port anchors
+  function getPortAnchor(pos: { x: number; y: number; w: number; h: number }, side?: string) {
+    if (side === "top") return { x: pos.x + pos.w / 2, y: pos.y };
+    if (side === "right") return { x: pos.x + pos.w, y: pos.y + pos.h / 2 };
+    if (side === "bottom") return { x: pos.x + pos.w / 2, y: pos.y + pos.h };
+    if (side === "left") return { x: pos.x, y: pos.y + pos.h / 2 };
+    return { x: pos.x + pos.w / 2, y: pos.y + pos.h };
+  }
+
+  // Custom Shape Renderer
+  const renderShape = (type: NodeType, box: { x: number; y: number; w: number; h: number }, fill: string, stroke: string, strokeWidth: number) => {
+    const centerX = box.x + box.w / 2;
+    const centerY = box.y + box.h / 2;
+
+    if (type === "decision") {
+      return (
+        <polygon
+          points={`${centerX},${box.y} ${box.x + box.w},${centerY} ${centerX},${box.y + box.h} ${box.x},${centerY}`}
+          fill={fill}
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+        />
+      );
+    }
+    if (type === "document") {
+      const cut = 14;
+      return (
+        <path
+          d={`M ${box.x} ${box.y} L ${box.x + box.w - cut} ${box.y} L ${box.x + box.w} ${box.y + cut} L ${box.x + box.w} ${box.y + box.h} L ${box.x} ${box.y + box.h} Z`}
+          fill={fill}
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+        />
+      );
+    }
+    if (type === "executive") {
+      const slant = 14;
+      return (
+        <polygon
+          points={`${box.x + slant},${box.y} ${box.x + box.w},${box.y} ${box.x + box.w - slant},${box.y + box.h} ${box.x},${box.y + box.h}`}
+          fill={fill}
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+        />
+      );
+    }
+    if (type === "note") {
+      return (
+        <rect
+          x={box.x}
+          y={box.y}
+          width={box.w}
+          height={box.h}
+          rx="6"
+          fill="#FFFBEB"
+          stroke="#F59E0B"
+          strokeWidth={strokeWidth}
+          strokeDasharray="4 3"
+        />
+      );
+    }
+    return (
+      <rect
+        x={box.x}
+        y={box.y}
+        width={box.w}
+        height={box.h}
+        rx={type === "start" || type === "end" ? box.h / 2 : type === "option" ? 18 : 10}
+        fill={fill}
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+      />
+    );
+  };
 
   return (
     <div className="flow-container">
@@ -124,7 +312,7 @@ function FlowPreview({
             <button className="cancel-conn-btn" onClick={onCancelConnection}>ยกเลิก</button>
           </div>
         ) : (
-          <small className="canvas-tip">💡 คลิกที่กล่องเพื่อลากเส้นเชื่อม แก้ไข หรือลบกล่อง</small>
+          <small className="canvas-tip">💡 <strong>ลากกล่อง</strong>เพื่อย้ายตำแหน่ง · <strong>คลิกเส้น</strong>เพื่อปรับทิศทาง/หัวลูกศร</small>
         )}
       </div>
 
@@ -138,71 +326,129 @@ function FlowPreview({
           role="img"
           aria-label={`Flowchart ${workflow.name}`}
           onMouseMove={(e) => {
-            if (!connectingSourceId || !svgRef.current) return;
+            if (!svgRef.current) return;
             const rect = svgRef.current.getBoundingClientRect();
             const scaleX = width / rect.width;
             const scaleY = height / rect.height;
-            const x = (e.clientX - rect.left) * scaleX;
-            const y = (e.clientY - rect.top) * scaleY;
-            setMousePos({ x, y });
+
+            if (dragState) {
+              const dx = (e.clientX - dragState.startX) * scaleX / zoom;
+              const dy = (e.clientY - dragState.startY) * scaleY / zoom;
+              setNodeOffsets((prev) => ({
+                ...prev,
+                [dragState.nodeId]: {
+                  x: dragState.initialOffsetX + dx,
+                  y: dragState.initialOffsetY + dy,
+                },
+              }));
+            } else if (edgeDragState) {
+              const dy = (e.clientY - edgeDragState.startY) * scaleY / zoom;
+              setEdgeOffsets((prev) => ({
+                ...prev,
+                [edgeDragState.edgeId]: edgeDragState.initialOffset + dy,
+              }));
+            } else if (connectingSourceId) {
+              const x = (e.clientX - rect.left) * scaleX;
+              const y = (e.clientY - rect.top) * scaleY;
+              setMousePos({ x, y });
+            }
+          }}
+          onMouseUp={() => {
+            setDragState(null);
+            setEdgeDragState(null);
           }}
           onClick={(e) => {
-            if (e.target === e.currentTarget || (e.target as HTMLElement).tagName === "rect") {
-              if (connectingSourceId) {
-                onCancelConnection();
-              } else {
-                onSelectNode(null);
-                onSelectEdge(null);
-              }
+            const targetEl = e.target as HTMLElement | SVGElement;
+            if (targetEl.closest && targetEl.closest('[data-node-id], [data-edge-id], .node-popover-foreign, .selected-node-bar')) {
+              return;
+            }
+            if (connectingSourceId) {
+              onCancelConnection();
+            } else {
+              onSelectNode(null);
+              onSelectEdge(null);
             }
           }}
         >
           <defs>
+            {/* Arrowhead Markers for End, Start, Both, and None */}
             <marker id="arrow" markerWidth="8" markerHeight="8" refX="6.5" refY="3.5" orient="auto">
               <polygon points="0 0, 7 3.5, 0 7" fill="#1b5e43" />
+            </marker>
+            <marker id="arrow-start" markerWidth="8" markerHeight="8" refX="0.5" refY="3.5" orient="auto">
+              <polygon points="7 0, 0 3.5, 7 7" fill="#1b5e43" />
+            </marker>
+            <marker id="arrow-red" markerWidth="8" markerHeight="8" refX="6.5" refY="3.5" orient="auto">
+              <polygon points="0 0, 7 3.5, 0 7" fill="#dc2626" />
             </marker>
             <marker id="arrow-connecting" markerWidth="8" markerHeight="8" refX="6.5" refY="3.5" orient="auto">
               <polygon points="0 0, 7 3.5, 0 7" fill="#2563eb" />
             </marker>
-            <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-              <feDropShadow dx="0" dy="3" stdDeviation="4" floodColor="#0c2e20" floodOpacity="0.12" />
-            </filter>
             <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
               <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#276c4f" floodOpacity="0.5" />
             </filter>
-            <filter id="glow-edge" x="-20%" y="-20%" width="140%" height="140%">
-              <feDropShadow dx="0" dy="0" stdDeviation="4" floodColor="#f0bd52" floodOpacity="0.8" />
-            </filter>
           </defs>
 
-          <rect width={width} height={height} fill="#f4f8f5" rx="22" />
-          <text x="480" y="36" textAnchor="middle" className="svg-title">{workflow.name}</text>
-          <text x="480" y="60" textAnchor="middle" className="svg-subtitle">แหล่งข้อมูล: {workflow.sourceFile}</text>
+          {/* Diagram Header Title */}
+          <rect width={width} height={height} fill="#ffffff" rx="12" stroke="#000000" strokeWidth="2" />
+          <text x="480" y="38" textAnchor="middle" className="svg-title" fill="#000000" fontSize="22" fontWeight="800">
+            {workflow.name}
+          </text>
 
           {/* Swimlanes */}
           {workflow.lanes.map((lane, index) => {
             const x = 50 + index * laneWidth;
+            const headerColors = ["#5B9BD5", "#40C4AA", "#B39DDB", "#FF8A80"];
+            const bgTints = ["#FAFDF7", "#F0FBF8", "#F7F4FD", "#FFF5F5"];
+            const headerFill = headerColors[index % headerColors.length];
+            const bgFill = bgTints[index % bgTints.length];
             return (
               <g key={lane}>
-                <rect x={x} y="78" width={laneWidth} height={height - 106} fill={index % 2 ? "#eef5f1" : "#ffffff"} stroke="#c4d8ce" strokeWidth="1" />
-                <rect x={x} y="78" width={laneWidth} height="42" fill={index % 2 ? "#d6e9df" : "#c8e0d4"} stroke="#96b9a8" />
-                <text x={x + laneWidth / 2} y="104" textAnchor="middle" className="svg-lane">{lane}</text>
+                <rect x={x} y="58" width={laneWidth} height={height - 74} fill={bgFill} stroke="#000000" strokeWidth="1.2" />
+                <rect x={x} y="58" width={laneWidth} height="46" fill={headerFill} stroke="#000000" strokeWidth="1.2" />
+                <text x={x + laneWidth / 2} y="86" textAnchor="middle" fill="#000000" fontSize="13" fontWeight="bold">
+                  {lane}
+                </text>
               </g>
             );
           })}
 
-          {/* Edges */}
+          {/* Edges / Connectors */}
           {workflow.edges.map((edge) => {
             const source = positions.get(edge.source);
             const target = positions.get(edge.target);
             if (!source || !target) return null;
             const isEdgeSelected = selectedEdgeId === edge.id;
 
-            const sx = source.x + source.w / 2;
-            const sy = source.y + source.h;
-            const tx = target.x + target.w / 2;
-            const ty = target.y;
-            const mid = (sy + ty) / 2;
+            const isRejection = edge.label.includes("ปฏิเสธ") || edge.color === "#DC2626";
+            const isApproval = edge.label.includes("เห็นชอบ") || edge.label.includes("อนุมัติ");
+
+            // Port Side Anchors
+            const sSide = edge.sourceSide || (isRejection && edge.target === "W1-N01" ? "top" : "bottom");
+            const tSide = edge.targetSide || (isRejection && edge.target === "W1-N01" ? "top" : "top");
+
+            const sAnchor = getPortAnchor(source, sSide);
+            const tAnchor = getPortAnchor(target, tSide);
+
+            const midOffset = edgeOffsets[edge.id] || edge.midOffset || 0;
+            let midY = (sAnchor.y + tAnchor.y) / 2 + midOffset;
+
+            let pathD = `M ${sAnchor.x} ${sAnchor.y} L ${sAnchor.x} ${midY} L ${tAnchor.x} ${midY} L ${tAnchor.x} ${tAnchor.y}`;
+
+            if (isRejection && edge.target === "W1-N01" && !edge.sourceSide) {
+              const topY = Math.min(source.y, target.y) - 25 + midOffset;
+              pathD = `M ${source.x + source.w / 2} ${source.y} L ${source.x + source.w / 2} ${topY} L ${target.x + target.w / 2} ${topY} L ${target.x + target.w / 2} ${target.y}`;
+              midY = topY;
+            } else if (sSide === "right" && tSide === "left") {
+              const midX = (sAnchor.x + tAnchor.x) / 2 + midOffset;
+              pathD = `M ${sAnchor.x} ${sAnchor.y} L ${midX} ${sAnchor.y} L ${midX} ${tAnchor.y} L ${tAnchor.x} ${tAnchor.y}`;
+            }
+
+            const strokeColor = isEdgeSelected ? "#f59e0b" : isRejection ? "#DC2626" : edge.color || "#000000";
+            const arrowHead = edge.arrowHead || "end";
+
+            const markerEnd = arrowHead === "end" || arrowHead === "both" ? (isRejection ? "url(#arrow-red)" : "url(#arrow)") : undefined;
+            const markerStart = arrowHead === "start" || arrowHead === "both" ? "url(#arrow-start)" : undefined;
 
             return (
               <g
@@ -210,42 +456,91 @@ function FlowPreview({
                 data-edge-id={edge.id}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onSelectEdge(edge.id);
-                  onSelectNode(null);
+                  if (connectingSourceId) {
+                    onCancelConnection();
+                  } else {
+                    onSelectEdge(edge.id);
+                    onSelectNode(null);
+                  }
                 }}
                 style={{ cursor: "pointer" }}
-                filter={isEdgeSelected ? "url(#glow-edge)" : undefined}
               >
-                {/* Thick hit area for easy clicking */}
+                <path d={pathD} fill="none" stroke="transparent" strokeWidth="12" />
                 <path
-                  d={`M ${sx} ${sy} L ${sx} ${mid} L ${tx} ${mid} L ${tx} ${ty}`}
+                  d={pathD}
                   fill="none"
-                  stroke="transparent"
-                  strokeWidth="12"
+                  stroke={strokeColor}
+                  strokeWidth={isEdgeSelected ? "3.5" : "2"}
+                  strokeDasharray={edge.style === "dash" ? "6 5" : undefined}
+                  markerEnd={markerEnd}
+                  markerStart={markerStart}
                 />
-                <path
-                  d={`M ${sx} ${sy} L ${sx} ${mid} L ${tx} ${mid} L ${tx} ${ty}`}
-                  fill="none"
-                  stroke={isEdgeSelected ? "#f0bd52" : edge.color || "#1b5e43"}
-                  strokeWidth={isEdgeSelected ? "3.5" : "2.2"}
-                  strokeDasharray={edge.style === "dash" ? "7 6" : undefined}
-                  markerEnd="url(#arrow)"
-                />
+
+                {/* Line Bend Drag Handle when Selected */}
+                {isEdgeSelected ? (
+                  <circle
+                    cx={(sAnchor.x + tAnchor.x) / 2}
+                    cy={midY}
+                    r="6"
+                    fill="#F59E0B"
+                    stroke="#FFFFFF"
+                    strokeWidth="2"
+                    style={{ cursor: "ns-resize" }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      setEdgeDragState({
+                        edgeId: edge.id,
+                        startY: e.clientY,
+                        initialOffset: midOffset,
+                      });
+                    }}
+                  >
+                    <title>ลากเพื่อเลื่อนตำแหน่งเส้น</title>
+                  </circle>
+                ) : null}
+
                 {edge.label ? (
-                  <g transform={`translate(${(sx + tx) / 2}, ${mid})`}>
-                    <rect x="-40" y="-12" width="80" height="20" rx="10" fill={isEdgeSelected ? "#fff7d6" : "#ffffff"} stroke={isEdgeSelected ? "#b57411" : "#8cb5a1"} strokeWidth="1.2" />
-                    <text x="0" y="2" textAnchor="middle" className="svg-edge-label">{edge.label}</text>
+                  <g transform={`translate(${(sAnchor.x + tAnchor.x) / 2}, ${midY})`}>
+                    {isRejection ? (
+                      <g transform="translate(-60, -12)">
+                        <rect width="120" height="22" rx="11" fill="#FEE2E2" stroke="#EF4444" strokeWidth="1.5" />
+                        <text x="60" y="15" textAnchor="middle" fill="#991B1B" fontSize="10.5" fontWeight="bold">
+                          ✖ {edge.label}
+                        </text>
+                      </g>
+                    ) : isApproval ? (
+                      <g transform="translate(-60, -12)">
+                        <rect width="120" height="22" rx="11" fill="#DCFCE7" stroke="#22C55E" strokeWidth="1.5" />
+                        <text x="60" y="15" textAnchor="middle" fill="#15803D" fontSize="10.5" fontWeight="bold">
+                          ✔ {edge.label}
+                        </text>
+                      </g>
+                    ) : edge.label.toLowerCase().includes("option") ? (
+                      <g transform="translate(-45, -11)">
+                        <rect width="90" height="20" rx="10" fill={strokeColor} stroke="#ffffff" strokeWidth="1" />
+                        <text x="45" y="14" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="bold">
+                          {edge.label}
+                        </text>
+                      </g>
+                    ) : (
+                      <g transform="translate(-48, -11)">
+                        <rect width="96" height="20" rx="10" fill="#ffffff" stroke={strokeColor} strokeWidth="1.2" />
+                        <text x="48" y="14" textAnchor="middle" fill="#000000" fontSize="10" fontWeight="bold">
+                          {edge.label}
+                        </text>
+                      </g>
+                    )}
                   </g>
                 ) : null}
               </g>
             );
           })}
 
-          {/* Live Connecting Line Guide */}
+          {/* Live Connecting Line */}
           {connectingSourceId && sourcePos && mousePos ? (
             <g className="live-connecting-line">
               <path
-                d={`M ${sourcePos.x + sourcePos.w / 2} ${sourcePos.y + sourcePos.h} C ${sourcePos.x + sourcePos.w / 2} ${sourcePos.y + sourcePos.h + 40}, ${mousePos.x} ${mousePos.y - 40}, ${mousePos.x} ${mousePos.y}`}
+                d={`M ${sourcePos.x + sourcePos.w / 2} ${sourcePos.y + sourcePos.h} L ${mousePos.x} ${mousePos.y}`}
                 fill="none"
                 stroke="#2563eb"
                 strokeWidth="2.5"
@@ -262,125 +557,283 @@ function FlowPreview({
             const isConnectingSource = connectingSourceId === node.id;
             const isConnectingTargetCandidate = Boolean(connectingSourceId && connectingSourceId !== node.id);
 
-            const fill = node.type === "decision" ? "#fff3c4" : node.type === "document" ? "#e0f2fe" : node.type === "start" || node.type === "end" ? "#d1fae5" : node.type === "note" ? "#fef9c3" : "#ffffff";
-            const stroke = isSelected ? "#106e46" : isConnectingSource ? "#2563eb" : isConnectingTargetCandidate ? "#3b82f6" : "#2d6650";
-            const strokeWidth = isSelected || isConnectingSource ? 3 : isConnectingTargetCandidate ? 2 : 1.5;
+            const laneIndex = Math.max(0, workflow.lanes.indexOf(node.lane));
 
-            const centerX = box.x + box.w / 2;
-            const centerY = box.y + box.h / 2;
+            let fill = "#ffffff";
+            let stroke = isSelected ? "#2563eb" : "#000000";
+            let textColor = "#000000";
+
+            if (node.type === "start") {
+              fill = "#2563eb"; textColor = "#ffffff";
+            } else if (node.type === "end") {
+              fill = "#dc2626"; textColor = "#ffffff";
+            } else if (node.type === "option") {
+              fill = "#e0f2fe"; stroke = "#0284c7"; textColor = "#0369a1";
+            } else if (laneIndex === 0) {
+              fill = "#e0f2fe"; stroke = "#3b82f6"; textColor = "#1e3a8a";
+            } else if (laneIndex === 1) {
+              fill = "#d1f4e0"; stroke = "#10b981"; textColor = "#064e3b";
+            } else if (laneIndex === 2) {
+              fill = "#e0eafc"; stroke = "#60a5fa"; textColor = "#1e3a8a";
+            } else if (laneIndex === 3 || node.type === "executive") {
+              fill = "#fce7f3"; stroke = "#ec4899"; textColor = "#831843";
+            }
+
+            const strokeWidth = isSelected || isConnectingSource ? 3 : 1.5;
+            const lines = node.text ? node.text.split("\n") : [];
+            const headerText = lines[0] || "";
+            const bulletLines = lines.slice(1);
 
             return (
               <g
                 key={node.id}
                 data-node-id={node.id}
-                filter={isSelected ? "url(#glow)" : "url(#shadow)"}
+                filter={isSelected ? "url(#glow)" : undefined}
                 className={`svg-node-group ${isConnectingTargetCandidate ? "target-candidate" : ""}`}
+                onMouseDown={(e) => {
+                  if (connectingSourceId) return;
+                  e.stopPropagation();
+                  onSelectNode(node.id);
+                  onSelectEdge(null);
+                  const currOffset = nodeOffsets[node.id] || { x: 0, y: 0 };
+                  setDragState({
+                    nodeId: node.id,
+                    startX: e.clientX,
+                    startY: e.clientY,
+                    initialOffsetX: currOffset.x,
+                    initialOffsetY: currOffset.y,
+                  });
+                }}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (connectingSourceId) {
                     if (connectingSourceId !== node.id) {
                       onCompleteConnection(node.id);
+                    } else {
+                      onCancelConnection();
                     }
                   } else {
                     onSelectNode(node.id);
                     onSelectEdge(null);
                   }
                 }}
-                style={{ cursor: connectingSourceId ? "crosshair" : "pointer" }}
+                style={{ cursor: connectingSourceId ? "crosshair" : "grab" }}
               >
-                {node.type === "decision" ? (
-                  <polygon
-                    points={`${centerX},${box.y} ${box.x + box.w},${centerY} ${centerX},${box.y + box.h} ${box.x},${centerY}`}
-                    fill={fill}
-                    stroke={stroke}
-                    strokeWidth={strokeWidth}
-                    strokeDasharray={isConnectingTargetCandidate ? "5 4" : undefined}
-                  />
-                ) : (
-                  <rect
-                    x={box.x}
-                    y={box.y}
-                    width={box.w}
-                    height={box.h}
-                    rx={node.type === "start" || node.type === "end" ? 28 : 12}
-                    fill={fill}
-                    stroke={stroke}
-                    strokeWidth={strokeWidth}
-                    strokeDasharray={isConnectingTargetCandidate ? "5 4" : undefined}
-                  />
-                )}
+                {renderShape(node.type, box, fill, stroke, strokeWidth)}
 
-                {/* Target Candidate Badge */}
-                {isConnectingTargetCandidate ? (
-                  <g transform={`translate(${centerX}, ${box.y - 12})`}>
-                    <rect x="-50" y="-10" width="100" height="18" rx="9" fill="#2563eb" />
-                    <text x="0" y="3" textAnchor="middle" fill="#ffffff" fontSize="9" fontWeight="bold">คลิกเพื่อเชื่อมต่อ</text>
-                  </g>
-                ) : null}
-
-                {/* Node ID Badge */}
-                <text x={centerX} y={box.y + (node.type === "decision" ? 20 : 16)} textAnchor="middle" className="svg-node-id">
-                  {node.id} · {typeLabels[node.type]}
-                </text>
-
-                {/* Node Text with Dynamic Fit */}
-                <foreignObject
-                  x={box.x + (node.type === "decision" ? box.w * 0.16 : 10)}
-                  y={box.y + (node.type === "decision" ? box.h * 0.22 : 22)}
-                  width={node.type === "decision" ? box.w * 0.68 : box.w - 20}
-                  height={node.type === "decision" ? box.h * 0.58 : box.h - 28}
-                >
-                  <div className="svg-node-text-container">
-                    <span className="svg-node-text">{node.text}</span>
+                <foreignObject x={box.x + 4} y={box.y + 4} width={box.w - 8} height={box.h - 8} style={{ pointerEvents: "none" }}>
+                  <div
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "center",
+                      alignItems: bulletLines.length > 0 ? "flex-start" : "center",
+                      padding: "4px 8px",
+                      color: textColor,
+                      fontSize: "11px",
+                      overflow: "hidden",
+                      userSelect: "none",
+                    }}
+                  >
+                    {node.type === "start" ? (
+                      <div style={{ color: "#fff", fontWeight: "bold", textAlign: "center", width: "100%" }}>
+                        <span style={{ background: "#1D4ED8", padding: "2px 8px", borderRadius: "10px", marginRight: "6px", fontSize: "10px" }}>START</span>
+                        {node.text}
+                      </div>
+                    ) : node.type === "end" ? (
+                      <div style={{ color: "#fff", fontWeight: "bold", textAlign: "center", width: "100%" }}>
+                        <div style={{ fontSize: "15px", letterSpacing: "1px" }}>FINAL</div>
+                        <div style={{ fontSize: "10px", fontWeight: "normal" }}>เสร็จสิ้น</div>
+                      </div>
+                    ) : (
+                      <>
+                        <div
+                          style={{
+                            fontWeight: "700",
+                            fontSize: "11.5px",
+                            textAlign: bulletLines.length > 0 ? "left" : "center",
+                            width: "100%",
+                            marginBottom: bulletLines.length > 0 ? "3px" : "0",
+                            lineHeight: "1.3",
+                          }}
+                        >
+                          {headerText}
+                        </div>
+                        {bulletLines.length > 0 ? (
+                          <ul
+                            style={{
+                              margin: 0,
+                              paddingLeft: "14px",
+                              fontSize: "10px",
+                              color: "#334155",
+                              textAlign: "left",
+                              lineHeight: "1.3",
+                            }}
+                          >
+                            {bulletLines.map((line, i) => (
+                              <li key={i}>{line.replace(/^[•\-]\s*/, "")}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </>
+                    )}
                   </div>
                 </foreignObject>
 
-                {/* On-Canvas Action Buttons when Selected */}
-                {isSelected && !connectingSourceId ? (
-                  <g className="node-canvas-actions">
-                    {/* Delete Icon Button (Top Right) */}
-                    <g
-                      transform={`translate(${box.x + box.w - 10}, ${box.y - 10})`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteNode(node.id);
-                      }}
-                      style={{ cursor: "pointer" }}
-                    >
-                      <circle r="13" fill="#ef4444" stroke="#ffffff" strokeWidth="2" />
-                      <text x="0" y="4" textAnchor="middle" fill="#ffffff" fontSize="12" fontWeight="bold">✕</text>
-                    </g>
-
-                    {/* Draw Connection Handle (Top Left / Port) */}
-                    <g
-                      transform={`translate(${box.x + 10}, ${box.y - 10})`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onStartConnection(node.id);
-                      }}
-                      style={{ cursor: "pointer" }}
-                    >
-                      <circle r="13" fill="#2563eb" stroke="#ffffff" strokeWidth="2" />
-                      <text x="0" y="4" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="bold">🔗</text>
-                    </g>
-
-                    {/* Add Next Step Button (Bottom Center) */}
-                    <g
-                      transform={`translate(${centerX}, ${box.y + box.h + 16})`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onAddNodeAfter(node.id);
-                      }}
-                      style={{ cursor: "pointer" }}
-                    >
-                      <circle r="14" fill="#106e46" stroke="#ffffff" strokeWidth="2" />
-                      <text x="0" y="4" textAnchor="middle" fill="#ffffff" fontSize="15" fontWeight="bold">+</text>
-                    </g>
+                {/* Connection Port Handles on Selected Node */}
+                {isSelected ? (
+                  <g className="port-handles">
+                    {(["top", "right", "bottom", "left"] as const).map((side) => {
+                      const port = getPortAnchor(box, side);
+                      return (
+                        <circle
+                          key={side}
+                          cx={port.x}
+                          cy={port.y}
+                          r="5.5"
+                          fill="#2563EB"
+                          stroke="#FFFFFF"
+                          strokeWidth="2"
+                          style={{ cursor: "pointer" }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onStartConnection(node.id);
+                          }}
+                        >
+                          <title>{`พอร์ตเชื่อมต่อทิศทาง ${side}`}</title>
+                        </circle>
+                      );
+                    })}
                   </g>
                 ) : null}
               </g>
             );
           })}
+
+          {/* Floating Canvas Node Popover when Selected */}
+          {(() => {
+            const selNode = workflow.nodes.find((n) => n.id === selectedNodeId);
+            if (!selNode) return null;
+            const selBox = positions.get(selNode.id);
+            if (!selBox) return null;
+
+            const popoverWidth = 340;
+            const popoverHeight = 135;
+            const posX = Math.max(10, Math.min(width - popoverWidth - 10, selBox.x + selBox.w / 2 - popoverWidth / 2));
+            const posY = selBox.y - popoverHeight - 12 < 60 ? selBox.y + selBox.h + 12 : selBox.y - popoverHeight - 12;
+
+            const targetEdges = workflow.edges.filter((e) => e.source === selNode.id || e.target === selNode.id);
+            const activeArrowHead = targetEdges[0]?.arrowHead || "end";
+
+            return (
+              <foreignObject
+                x={posX}
+                y={posY}
+                width={popoverWidth}
+                height={popoverHeight}
+                className="node-popover-foreign"
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div className="node-floating-popover">
+                  <div className="popover-header">
+                    <div className="popover-title">
+                      <span className="popover-node-id">{selNode.id}</span>
+                      <strong>แก้ไขกล่องที่เลือก</strong>
+                    </div>
+                    <button
+                      className="popover-close-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectNode(null);
+                      }}
+                      title="ปิดหน้าต่างปรับแต่ง"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="popover-body">
+                    <div className="popover-row">
+                      <div className="popover-field">
+                        <label>ประเภทกล่อง:</label>
+                        <select
+                          value={selNode.type}
+                          onChange={(e) => onUpdateNode(selNode.id, { type: e.target.value as NodeType })}
+                        >
+                          {Object.entries(typeLabels).map(([val, label]) => (
+                            <option key={val} value={val}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="popover-field">
+                        <label>หัวลูกศรเส้นเชื่อม:</label>
+                        <select
+                          value={activeArrowHead}
+                          onChange={(e) => {
+                            const newArrow = e.target.value as ArrowHeadType;
+                            if (targetEdges.length > 0) {
+                              targetEdges.forEach((edge) => onUpdateEdge(edge.id, { arrowHead: newArrow }));
+                            }
+                          }}
+                        >
+                          <option value="end">➔ ปลายทาง</option>
+                          <option value="start">← ต้นทาง</option>
+                          <option value="both">↔ สองทิศทาง</option>
+                          <option value="none">― ไม่มีลูกศร</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="popover-row">
+                      <input
+                        className="popover-text-input"
+                        value={selNode.text}
+                        onChange={(e) => onUpdateNode(selNode.id, { text: e.target.value })}
+                        placeholder="ข้อความในกล่อง..."
+                      />
+                      <button
+                        className="popover-act-btn connect"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onStartConnection(selNode.id);
+                        }}
+                        title="ลากเส้นเชื่อมไปกล่องอื่น"
+                      >
+                        🔗 ลากเส้น
+                      </button>
+                      <button
+                        className="popover-act-btn add"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onAddNodeAfter(selNode.id);
+                        }}
+                        title="เพิ่มขั้นตอนต่อ"
+                      >
+                        ➕ เพิ่ม
+                      </button>
+                      <button
+                        className="popover-act-btn del"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteNode(selNode.id);
+                          onSelectNode(null);
+                        }}
+                        title="ลบกล่องนี้"
+                      >
+                        🗑️ ลบ
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </foreignObject>
+            );
+          })()}
         </svg>
       </div>
     </div>
@@ -772,12 +1225,16 @@ export default function Home() {
 
         <section className="main-stage">
           <div className="panel stage-toolbar">
-            <div className="workflow-title-block"><span className="workflow-id">{workflow.id}</span><input value={workflow.name} onChange={(event) => setWorkflow((current) => ({ ...current, name: event.target.value }))} aria-label="ชื่อ Workflow" /><small>วิเคราะห์แบบ {workflow.analysisMode === "pattern" ? "Pattern offline" : "ตัวอย่างระบบ"}</small></div>
-            <div className="mode-switcher">
-              <button className={`mode-btn ${viewMode === "flow" ? "active" : ""}`} onClick={() => setViewMode("flow")} title="แสดงผลลัพธ์เป็นไดอะแกรม Flowchart"><GitBranch size={15} /> แปลง Text ➔ Flow (Diagram)</button>
-              <button className={`mode-btn ${viewMode === "text" ? "active" : ""}`} onClick={() => setViewMode("text")} title="แสดงผลลัพธ์เป็นข้อความระเบียบปฏิบัติงาน SOP"><FileText size={15} /> แปลง Flow ➔ Text (SOP 15 หมวด)</button>
+            <div className="stage-toolbar-top">
+              <div className="workflow-title-block"><span className="workflow-id">{workflow.id}</span><div><input value={workflow.name} onChange={(event) => setWorkflow((current) => ({ ...current, name: event.target.value }))} aria-label="ชื่อ Workflow" /><small>วิเคราะห์แบบ {workflow.analysisMode === "pattern" ? "Pattern offline" : "ตัวอย่างระบบ"}</small></div></div>
+              <div className="qa-summary"><span className={failures ? "qa-fail" : "qa-pass"}>{failures ? <AlertTriangle size={14} /> : <Check size={14} />}{failures ? `${failures} Fail` : "โครงสร้างผ่าน"}</span><span className="qa-warn">{warnings} จุดควรทบทวน</span></div>
             </div>
-            <div className="qa-summary"><span className={failures ? "qa-fail" : "qa-pass"}>{failures ? <AlertTriangle size={14} /> : <Check size={14} />}{failures ? `${failures} Fail` : "โครงสร้างผ่าน"}</span><span className="qa-warn">{warnings} จุดควรทบทวน</span></div>
+            <div className="stage-toolbar-bottom">
+              <div className="mode-switcher">
+                <button className={`mode-btn ${viewMode === "flow" ? "active" : ""}`} onClick={() => setViewMode("flow")} title="แสดงผลลัพธ์เป็นไดอะแกรม Flowchart"><GitBranch size={15} /> แปลง Text ➔ Flow (Diagram)</button>
+                <button className={`mode-btn ${viewMode === "text" ? "active" : ""}`} onClick={() => setViewMode("text")} title="แสดงผลลัพธ์เป็นข้อความระเบียบปฏิบัติงาน SOP"><FileText size={15} /> แปลง Flow ➔ Text (SOP 15 หมวด)</button>
+              </div>
+            </div>
           </div>
 
           {viewMode === "flow" ? (
@@ -801,6 +1258,7 @@ export default function Home() {
                   onUpdateNode={updateNode}
                   onDeleteNode={deleteNode}
                   onAddNodeAfter={addNodeAfter}
+                  onUpdateEdge={updateEdge}
                 />
               </div>
 
@@ -820,14 +1278,32 @@ export default function Home() {
                     <select
                       value={selectedNode.type}
                       onChange={(e) => updateNode(selectedNode.id, { type: e.target.value as NodeType })}
+                      title="เปลี่ยนรูปแบบกล่อง"
                     >
                       {Object.entries(typeLabels).map(([val, label]) => (
                         <option key={val} value={val}>{label}</option>
                       ))}
                     </select>
                     <select
+                      value={
+                        workflow.edges.find((e) => e.source === selectedNode.id || e.target === selectedNode.id)?.arrowHead || "end"
+                      }
+                      onChange={(e) => {
+                        const newArrow = e.target.value as ArrowHeadType;
+                        const connectedEdges = workflow.edges.filter((edge) => edge.source === selectedNode.id || edge.target === selectedNode.id);
+                        connectedEdges.forEach((edge) => updateEdge(edge.id, { arrowHead: newArrow }));
+                      }}
+                      title="รูปแบบหัวลูกศรเส้นเชื่อม"
+                    >
+                      <option value="end">หัวลูกศร: ➔ ปลายทาง</option>
+                      <option value="start">หัวลูกศร: ← ต้นทาง</option>
+                      <option value="both">หัวลูกศร: ↔ สองทิศทาง</option>
+                      <option value="none">หัวลูกศร: ― ไม่มีลูกศร</option>
+                    </select>
+                    <select
                       value={selectedNode.lane}
                       onChange={(e) => updateNode(selectedNode.id, { lane: e.target.value })}
+                      title="ย้าย Swimlane"
                     >
                       {workflow.lanes.map((lane) => (
                         <option key={lane} value={lane}>{lane}</option>
@@ -862,16 +1338,60 @@ export default function Home() {
                     <select
                       value={selectedEdge.style}
                       onChange={(e) => updateEdge(selectedEdge.id, { style: e.target.value as FlowEdge["style"] })}
+                      title="รูปแบบเส้น"
                     >
                       <option value="solid">เส้นทึบ</option>
                       <option value="dash">เส้นประ</option>
+                    </select>
+                    <select
+                      value={selectedEdge.arrowHead || "end"}
+                      onChange={(e) => updateEdge(selectedEdge.id, { arrowHead: e.target.value as ArrowHeadType })}
+                      title="รูปแบบหัวลูกศร"
+                    >
+                      <option value="end">หัวลูกศรปลายทาง (➔)</option>
+                      <option value="start">หัวลูกศรต้นทาง (←)</option>
+                      <option value="both">สองทิศทาง (↔)</option>
+                      <option value="none">ไม่มีหัวลูกศร (―)</option>
+                    </select>
+                    <select
+                      value={selectedEdge.sourceSide || "bottom"}
+                      onChange={(e) => updateEdge(selectedEdge.id, { sourceSide: e.target.value as FlowEdge["sourceSide"] })}
+                      title="ทิศทางออก (Source Side)"
+                    >
+                      <option value="bottom">ออก: ล่าง</option>
+                      <option value="top">ออก: บน</option>
+                      <option value="right">ออก: ขวา</option>
+                      <option value="left">ออก: ซ้าย</option>
+                    </select>
+                    <select
+                      value={selectedEdge.targetSide || "top"}
+                      onChange={(e) => updateEdge(selectedEdge.id, { targetSide: e.target.value as FlowEdge["targetSide"] })}
+                      title="ทิศทางเข้า (Target Side)"
+                    >
+                      <option value="top">เข้า: บน</option>
+                      <option value="bottom">เข้า: ล่าง</option>
+                      <option value="left">เข้า: ซ้าย</option>
+                      <option value="right">เข้า: ขวา</option>
                     </select>
                     <input
                       type="color"
                       value={selectedEdge.color || "#165B40"}
                       onChange={(e) => updateEdge(selectedEdge.id, { color: e.target.value })}
                       style={{ width: "36px", padding: "2px", height: "30px", cursor: "pointer" }}
+                      title="เลือกสีเส้น"
                     />
+                    <button
+                      className="add-next-btn"
+                      onClick={() => {
+                        updateEdge(selectedEdge.id, {
+                          source: selectedEdge.target,
+                          target: selectedEdge.source,
+                        });
+                      }}
+                      title="สลับทิศทางเส้น"
+                    >
+                      ⇄ สลับทิศทาง
+                    </button>
                     <button className="del-node-btn" onClick={() => { deleteEdge(selectedEdge.id); setSelectedEdgeId(null); }}>
                       <Trash2 size={14} /> ลบเส้นเชื่อม
                     </button>

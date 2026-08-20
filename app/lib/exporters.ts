@@ -89,10 +89,18 @@ function shapeType(pptx: PptxGenJS, node: FlowNode) {
   return pptx.ShapeType.flowChartProcess;
 }
 
+function laneHeaderFill(laneIndex: number) {
+  const colors = ["93C5FD", "5EEAD4", "C084FC", "F87171"];
+  return colors[laneIndex % colors.length];
+}
+
 function shapeFill(node: FlowNode) {
   if (node.type === "decision") return "FFF1B8";
-  if (node.type === "document") return "E8F3FF";
-  if (node.type === "start" || node.type === "end") return "DDF3E8";
+  if (node.type === "document") return "FEF3C7";
+  if (node.type === "start") return "2563EB";
+  if (node.type === "end") return "DC2626";
+  if (node.type === "option") return "D1FAE5";
+  if (node.type === "executive") return "FCE7F3";
   if (node.type === "note") return "FFF7D6";
   return "FFFFFF";
 }
@@ -108,7 +116,7 @@ function addLineShape(slide: PptxGenJS.Slide, pptx: PptxGenJS, edge: FlowEdge, o
     y: sy,
     w: tx - sx,
     h: ty - sy,
-    line: { color: edge.color.replace("#", ""), width: 1.5, dashType: edge.style === "dash" ? "dash" : "solid", endArrowType: "triangle" },
+    line: { color: edge.color ? edge.color.replace("#", "") : "000000", width: 1.5, dashType: edge.style === "dash" ? "dash" : "solid", endArrowType: "triangle" },
   });
   if (edge.label) {
     slide.addText(edge.label, { x: Math.min(sx, tx) + 0.03, y: (sy + ty) / 2 - 0.16, w: Math.max(Math.abs(tx - sx), 0.8), h: 0.3, fontFace: "TH SarabunPSK", fontSize: 11, color: "4B5563", fill: { color: "FFFFFF", transparency: 8 }, margin: 0.02, breakLine: false });
@@ -150,7 +158,7 @@ export async function buildEditablePptx(workflow: Workflow) {
   pptx.title = workflow.name;
   pptx.theme = { headFontFace: "TH SarabunPSK", bodyFontFace: "TH SarabunPSK" };
 
-  const nodesPerSlide = 9;
+  const nodesPerSlide = 16;
   const pageCount = Math.max(1, Math.ceil(workflow.nodes.length / nodesPerSlide));
   const laneCount = Math.max(1, workflow.lanes.length);
   const laneWidth = 7 / laneCount;
@@ -161,14 +169,14 @@ export async function buildEditablePptx(workflow: Workflow) {
   for (let page = 0; page < pageCount; page += 1) {
     const slide = pptx.addSlide();
     slides.push(slide);
-    slide.background = { color: "F7F9F8" };
-    slide.addText(workflow.name, { x: 0.35, y: 0.18, w: 6.8, h: 0.48, fontFace: "TH SarabunPSK", fontSize: 22, bold: true, color: "103E2D", align: "center", margin: 0 });
+    slide.background = { color: "FFFFFF" };
+    slide.addText(workflow.name, { x: 0.35, y: 0.18, w: 6.8, h: 0.48, fontFace: "TH SarabunPSK", fontSize: 22, bold: true, color: "000000", align: "center", margin: 0 });
     slide.addText(`หน้า ${page + 1}/${pageCount} · ${workflow.sourceFile}`, { x: 0.35, y: 0.7, w: 6.8, h: 0.24, fontFace: "TH SarabunPSK", fontSize: 10, color: "617068", align: "center", margin: 0 });
     workflow.lanes.forEach((lane, laneIndex) => {
       const x = 0.25 + laneIndex * laneWidth;
-      slide.addShape(pptx.ShapeType.rect, { x, y: 1.05, w: laneWidth, h: 11.8, fill: { color: laneIndex % 2 ? "F3F7F5" : "FFFFFF", transparency: 4 }, line: { color: "B9CEC3", width: 0.7 } });
-      slide.addShape(pptx.ShapeType.rect, { x, y: 1.05, w: laneWidth, h: 0.55, fill: { color: laneIndex % 2 ? "DDEBE4" : "CFE4D9" }, line: { color: "8AAE9B", width: 0.7 } });
-      slide.addText(lane, { x: x + 0.05, y: 1.16, w: laneWidth - 0.1, h: 0.28, fontFace: "TH SarabunPSK", fontSize: 12, bold: true, color: "174F39", align: "center", margin: 0.02, fit: "shrink" });
+      slide.addShape(pptx.ShapeType.rect, { x, y: 1.05, w: laneWidth, h: 11.8, fill: { color: "FFFFFF" }, line: { color: "000000", width: 1.0 } });
+      slide.addShape(pptx.ShapeType.rect, { x, y: 1.05, w: laneWidth, h: 0.55, fill: { color: laneHeaderFill(laneIndex) }, line: { color: "000000", width: 1.0 } });
+      slide.addText(lane, { x: x + 0.05, y: 1.16, w: laneWidth - 0.1, h: 0.28, fontFace: "TH SarabunPSK", fontSize: 12, bold: true, color: "000000", align: "center", margin: 0.02, fit: "shrink" });
     });
     const pageNodes = workflow.nodes.slice(page * nodesPerSlide, (page + 1) * nodesPerSlide);
     pageNodes.forEach((node, localIndex) => {
